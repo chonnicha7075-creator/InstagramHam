@@ -1,33 +1,44 @@
-/* InstaChar v0.5.0 — Per-character IG world with character-aware prompts */
+/* InstaChar v0.7.0 — Auto-detect Role + Auto-post [FINAL COMPLETE] */
 
 import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced, eventSource, event_types } from "../../../../script.js";
 
 const extensionName = "Instachar";
 const extensionFolderPath = `scripts/extensions/third-party/${extensionName}`;
-const VERSION = "0.5.0";
+const VERSION = "0.7.0";
 
-// Global settings (shared across all chars)
-const DEFAULT_GLOBAL = {
-    iconVisible: true,
-    autoPost: false,        // OFF by default (user complained no posts — will give manual button)
-    ambientEnabled: false,  // OFF by default (perf)
-    postChance: 0.4,
-    iconPos: null,
-    currentTab: "feed",
-    characters: {},         // per-character data
+// ✅ Role detection mapping
+const ROLE_KEYWORDS = {
+    "พี่": ["พี่", "older brother", "big brother", "兄", "兄貴"],
+    "น้อง": ["น้อง", "younger sibling", "little brother", "妹", "弟"],
+    "แม่": ["แม่", "mother", "mom", "mum", "mama", "母"],
+    "พ่อ": ["พ่อ", "father", "dad", "papa", "父"],
+    "เพื่อน": ["เพื่อน", "friend", "buddy", "mate", "친구"],
+    "คู่รัก": ["แฟน", "หนึ่ง", "lover", "girlfriend", "boyfriend", "spouse", "妻", "夫"],
+    "ลูก": ["ลูก", "son", "daughter", "child", "kid", "子"],
+    "เจ้านาย": ["เจ้านาย", "boss", "master", "sir", "ma'am", "employer"],
+    "ผู้ใหญ่": ["ผู้ใหญ่", "elder", "senior", "teacher", "professor"],
 };
 
-// Per-character data template
+const DEFAULT_GLOBAL = {
+    iconVisible: true,
+    autoPost: true,         // ✅ ON by default now
+    ambientEnabled: false,
+    postChance: 0.35,       // ✅ ปรับ 25% → 35% (เล็กน้อย)
+    iconPos: null,
+    currentTab: "feed",
+    characters: {},
+};
+
 function newCharData() {
     return {
         name: "",
-        npcs: [],              // [{id, name, username, displayName, bio, avatar, followers, following, userFollowing, speechStyle}]
-        posts: [],             // [{id, author, authorUsername, authorAvatar, caption, image, imagePrompt, mood, hashtags, timestamp, likes, userLiked, comments, userComments, isUserPost}]
-        dms: {},               // { npcId: [{from, text, timestamp}] }
+        npcs: [],              
+        posts: [],             
+        dms: {},               
         userProfile: { username: "", displayName: "", bio: "", avatar: "" },
         unreadCount: 0,
-        selectedProfile: null, // temporary UI state
+        selectedProfile: null,
     };
 }
 
@@ -61,18 +72,22 @@ function getGlobal() {
     }
 }
 
+let saveTimer = null;
 function save() {
-    try { saveSettingsDebounced(); } catch (e) { log("save err: " + e.message, true); }
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+        try { saveSettingsDebounced(); } catch (e) { log("save err: " + e.message, true); }
+    }, 300);
 }
 
-// ---------- Character Context (HamHam pattern) ----------
+// ---------- Character Context ----------
 function getCharKey() {
     try {
         const ctx = getContext();
         if (ctx.groupId) return "group_" + ctx.groupId;
         if (ctx.characterId !== undefined && ctx.characterId !== null) {
             const ch = ctx.characters[ctx.characterId];
-            if (ch && ch.avatar) return ch.avatar;
+            if (ch && ch.avatar) return "char_" + ctx.characterId + "_" + (ctx.chat_id || "nochat");
         }
     } catch (e) {}
     return null;
@@ -118,6 +133,17 @@ function getRecentChat(n) {
     } catch (e) { return ""; }
 }
 
+// ✅ NEW: Get Lorebook context
+function getLoreBookContext() {
+    try {
+        const ctx = getContext();
+        if (ctx.lorebook && Array.isArray(ctx.lorebook)) {
+            return ctx.lorebook.map(entry => entry.content || "").filter(x => x).join("\n");
+        }
+    } catch (e) {}
+    return "";
+}
+
 function getCharData() {
     const key = getCharKey();
     if (!key) return null;
@@ -128,7 +154,6 @@ function getCharData() {
         save();
     }
     const d = g.characters[key];
-    // Migration safety
     if (!d.npcs) d.npcs = [];
     if (!d.posts) d.posts = [];
     if (!d.dms) d.dms = {};
@@ -156,7 +181,7 @@ function defaultAvatar(name) {
     const initial = (name || "?").charAt(0).toUpperCase();
     const colors = ["#e91e63","#9c27b0","#3f51b5","#00bcd4","#4caf50","#ff9800","#f44336","#795548","#607d8b"];
     const color = colors[(name || "").length % colors.length];
-    const svg = "<svg xmlns='http://www.w3.org/2000/svg' width='80' height='80'><rect fill='" + color + "' width='80' height='80'/><text x='40' y='52' font-size='36' text-anchor='middle' fill='white' font-family='sans-serif' font-weight='bold'>" + initial + "</text></svg>";
+    const svg = "<svg xmlns='http://www.w3.org/2000/svg' width='80' height='80'><rect fill='" + color + "' width='80' height='80'/><text x='40' y='52' font-size='36' text-anchor='middle' fill='white' font-weight='bold'>" + initial + "</text></svg>";
     return "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(svg)));
 }
 
@@ -165,9 +190,20 @@ function sanitizeUsername(name) {
     return name.toLowerCase().replace(/[^a-z0-9_\u0e00-\u0e7f]/g, "").slice(0, 20) || "user";
 }
 
+const imageCache = new Map();
 function makeImageUrl(prompt, seed) {
+    const cacheKey = (prompt || "default") + "_" + seed;
+    if (imageCache.has(cacheKey)) {
+        return imageCache.get(cacheKey);
+    }
     const p = encodeURIComponent(prompt || "aesthetic photo cinematic");
-    return "https://image.pollinations.ai/prompt/" + p + "?width=768&height=768&nologo=true&model=flux&seed=" + (seed || Math.floor(Math.random() * 99999));
+    const url = "https://image.pollinations.ai/prompt/" + p + "?width=512&height=512&nologo=true&model=flux-schnell&seed=" + (seed || Math.floor(Math.random() * 99999));
+    if (imageCache.size > 50) {
+        const firstKey = imageCache.keys().next().value;
+        imageCache.delete(firstKey);
+    }
+    imageCache.set(cacheKey, url);
+    return url;
 }
 
 function parseJson(text) {
@@ -192,11 +228,79 @@ function parseJson(text) {
     }
 }
 
+// ✅ NEW: Auto-detect role/relationship
+function detectRole(npc, description, chatHistory, loreContext) {
+    const fullText = (description + " " + chatHistory + " " + loreContext).toLowerCase();
+    
+    for (const [role, keywords] of Object.entries(ROLE_KEYWORDS)) {
+        for (const kw of keywords) {
+            if (fullText.includes(kw.toLowerCase())) {
+                return role;
+            }
+        }
+    }
+    return null; // ไม่รู้บทบาท ใช้ default
+}
+
+// ✅ NEW: Get pronoun & speech style based on role
+function getRoleContext(role) {
+    const roleMap = {
+        "พี่": {
+            pronoun: "พี่",
+            description: "ผู้ใหญ่ที่เป็นพี่ชาย",
+            styleHint: "พูดปกติ เป็นผู้ใหญ่ บ้างครั้งอาจหาบ้าง"
+        },
+        "น้อง": {
+            pronoun: "น้อง",
+            description: "คนที่เล็กกว่า",
+            styleHint: "พูดเหมือนน้องชาย น้อยใจ บ้างครั้งเอ้อ"
+        },
+        "แม่": {
+            pronoun: "แม่",
+            description: "แม่",
+            styleHint: "พูดเป็นแม่ เมตตา บางครั้งโวย"
+        },
+        "พ่อ": {
+            pronoun: "ป๊า",
+            description: "พ่อ",
+            styleHint: "พูดเป็นพ่อ เรียบร้อย บ้างครั้งเรียบหรือเสียดสี"
+        },
+        "เพื่อน": {
+            pronoun: "ฉัน/กู",
+            description: "เพื่อน",
+            styleHint: "พูดกู-มึง สนิท ขี้ขลาด บ้างครั้งหยาบ"
+        },
+        "คู่รัก": {
+            pronoun: "ฉัน",
+            description: "คู่รัก",
+            styleHint: "พูดปกติ โรแมนติก เคารพ บ้างครั้งเจ้าเล่น"
+        },
+        "ลูก": {
+            pronoun: "ลูก",
+            description: "ลูก",
+            styleHint: "พูดเป็นลูก บ้างครั้งเอ้อ เรียกพ่อแม่"
+        },
+        "เจ้านาย": {
+            pronoun: "ฉัน",
+            description: "เจ้านาย",
+            styleHint: "พูดสุภาพ เรียบร้อย ยกย่องผู้ใหญ่"
+        },
+    };
+    return roleMap[role] || { pronoun: "ฉัน", description: role || "คนปกติ", styleHint: "พูดปกติ" };
+}
+
 // ---------- NPC Management ----------
 function ensureNpcFromCharacterCard() {
-    // Main character from chat → NPC (only for non-group, non-narrator)
     const card = getCharacterCard();
     if (!card) return null;
+    
+    if (card.name?.toLowerCase().includes("narrator") || 
+        card.name?.toLowerCase().includes("gm") ||
+        card.name?.toLowerCase().includes("system")) {
+        log("Skipped narrator character: " + card.name, false);
+        return null;
+    }
+    
     const data = getCharData();
     if (!data) return null;
     let npc = data.npcs.find(n => n.name === card.name);
@@ -211,6 +315,12 @@ function createNpc(name, description, personality) {
     if (!data) return null;
     const existing = data.npcs.find(n => n.name === name);
     if (existing) return existing;
+    
+    // ✅ Auto-detect role
+    const chatHistory = getRecentChat(20);
+    const loreContext = getLoreBookContext();
+    const detectedRole = detectRole(null, description, chatHistory, loreContext);
+    
     const npc = {
         id: uid("npc"),
         name: name,
@@ -223,8 +333,8 @@ function createNpc(name, description, personality) {
         followers: Math.floor(Math.random() * 5000) + 100,
         following: Math.floor(Math.random() * 500) + 50,
         userFollowing: false,
+        role: detectedRole,  // ✅ Store detected role
     };
-    // Try to get character card avatar if this is main char
     try {
         const ctx = getContext();
         if (ctx.characterId !== undefined) {
@@ -236,7 +346,7 @@ function createNpc(name, description, personality) {
     } catch (e) {}
     data.npcs.push(npc);
     save();
-    log("NPC created: " + name);
+    log(`NPC created: ${name} (Role: ${detectedRole || "unknown"})`);
     return npc;
 }
 
@@ -294,16 +404,32 @@ async function callLLM(prompt, systemPrompt) {
     throw new Error("No LLM function available");
 }
 
-// Build character context string for prompts
 function buildCharContext(npc) {
     const lines = [];
     lines.push(`Character: ${npc.name}`);
+    
+    // ✅ Add role context
+    if (npc.role) {
+        const roleCtx = getRoleContext(npc.role);
+        lines.push(`Role/Relationship: ${npc.role} (${roleCtx.description})`);
+        lines.push(`Speech style: ${roleCtx.styleHint}`);
+        lines.push(`Pronoun: ${roleCtx.pronoun}`);
+    }
+    
     if (npc.description) lines.push(`Description: ${npc.description.slice(0, 500)}`);
     if (npc.personality) lines.push(`Personality: ${npc.personality.slice(0, 300)}`);
+    
     const recent = getRecentChat(10);
     if (recent) {
         lines.push(`\nRecent chat excerpt (match this speech style/tone/slang/vocabulary):\n${recent.slice(-1500)}`);
     }
+    
+    // ✅ Add Lorebook
+    const lore = getLoreBookContext();
+    if (lore) {
+        lines.push(`\nLorebook context:\n${lore.slice(-1000)}`);
+    }
+    
     return lines.join("\n");
 }
 
@@ -322,20 +448,29 @@ ${charCtx}
 Scene that just happened:
 ${sceneText}
 
-Task: Generate ONE Instagram post as "${npc.name}" reacting to this scene (or a random thought).
+Task: Generate ONE Instagram post as "${npc.name}" reacting to this scene.
 
 CRITICAL RULES:
-- Caption in Thai, MATCH the character's exact speech style from the chat excerpt above (if they curse, curse; if they're rough/rude, be rough; if polite, polite)
-- Do NOT soften or sanitize the character's voice
+- Caption MUST be in Thai ONLY
+- Use character's EXACT speech style and pronouns from role context (e.g., if พี่ then use "พี่", if เพื่อน then use "กู/มึง")
+- Match slang, tone, and personality PRECISELY
 - Short caption (1-3 sentences), natural IG vibe
-- Include emojis if character would use them
-- Image prompt in ENGLISH, describe scene/aesthetic (NOT the character themselves unless selfie)
+- Include emojis if fitting
+- Image prompt in ENGLISH only
 
 Respond ONLY with minified JSON:
-{"caption":"thai text","imagePrompt":"english","hashtags":["#tag"],"mood":"happy|sad|flirty|chill|excited|moody|proud|angry"}`;
+{"caption":"thai text matching character voice","imagePrompt":"english","hashtags":["#tag"],"mood":"happy|sad|flirty|chill|excited|moody|proud"}`;
 
     try {
-        const response = await callLLM(prompt, "You generate Instagram post data as JSON. Match the character's speech style precisely including slang and curse words.");
+        const systemPrompt = `You are an Instagram content writer.
+- Match the character's EXACT pronouns and speech style
+- If they use "${npc.role}" role context, use those pronouns ALWAYS
+- Keep captions SHORT (max 3 sentences)
+- Use emojis strategically
+- ONLY respond with valid JSON
+- Maintain character voice 100%`;
+
+        const response = await callLLM(prompt, systemPrompt);
         const d = parseJson(response);
         if (!d || !d.caption) { log("Post JSON invalid", true); return null; }
 
@@ -357,14 +492,13 @@ Respond ONLY with minified JSON:
             comments: [],
             userComments: [],
         };
-        // Generate comments
         post.comments = await generateComments(npc, post, sceneText);
         data.posts.push(post);
         data.unreadCount++;
         save();
         flashIcon();
         if (isPanelOpen() && getGlobal().currentTab === "feed") renderCurrentTab();
-        log(npc.name + " posted ✓");
+        log(`${npc.name} posted ✓ (Role: ${npc.role || "unknown"})`);
         return post;
     } catch (e) {
         log("Post gen failed: " + e.message, true);
@@ -388,7 +522,7 @@ Generate 2-4 Thai IG comments. Mix of:
 - Random followers
 - NEVER from "${userName}" or "${npc.name}"
 
-Keep comments short, natural Thai IG style. Match the tone of the story (if RP is edgy/crude, comments should be too).
+Keep comments short, natural Thai IG style.
 
 Respond ONLY with JSON array: [{"username":"name","text":"thai"}]`;
 
@@ -416,7 +550,7 @@ User just posted on IG:
 Caption: "${userPost.caption}"
 Image: "${userPost.imagePrompt || 'photo'}"
 
-Would "${npc.name}" like/comment based on their relationship with user and personality? Match their speech style exactly.
+Would "${npc.name}" like/comment based on their relationship with user and personality?
 
 Respond ONLY with JSON: {"like":true|false,"comment":"thai comment or null"}`;
     try {
@@ -443,12 +577,13 @@ ${charCtx}
 DM conversation with ${getUserName()}:
 ${recentThread}
 
-Reply as "${npc.name}" in Thai. Match their EXACT speech style from the chat context (if they use "กู/มึง", use them; if crude, be crude). Short (1-3 sentences), casual IG DM vibe. Stay in character.
+Reply as "${npc.name}" in Thai. Use their EXACT speech style and pronouns. Short (1-3 sentences), casual IG DM vibe. Stay in character.
 
 Reply directly. No JSON. No prefix. Just the message.`;
 
     try {
-        const response = await callLLM(prompt, "You are " + npc.name + " replying to a DM. Stay in character, match their exact speech style.");
+        const roleCtx = npc.role ? getRoleContext(npc.role) : { pronoun: "ฉัน" };
+        const response = await callLLM(prompt, `You are ${npc.name} (${npc.role || "character"}). Use pronoun "${roleCtx.pronoun}". Stay in character.`);
         const reply = (response || "").trim().replace(/^["'`]|["'`]$/g, "").split("\n")[0].slice(0, 500);
         if (!reply) return;
         data.dms[npcId] = data.dms[npcId] || [];
@@ -461,7 +596,7 @@ Reply directly. No JSON. No prefix. Just the message.`;
     }
 }
 
-// ---------- Shadow DOM ----------
+// ---------- Shadow DOM (เดียวกับเดิม) ----------
 let shadowHost = null;
 let shadowRoot = null;
 
@@ -470,7 +605,7 @@ function buildShadowHost() {
     if (existing) existing.remove();
     shadowHost = document.createElement("div");
     shadowHost.id = "instachar-shadow-host";
-    shadowHost.setAttribute("style", "position:fixed !important;top:0 !important;left:0 !important;width:100vw !important;height:100vh !important;z-index:2147483646 !important;pointer-events:none !important;margin:0 !important;padding:0 !important;border:0 !important;");
+    shadowHost.setAttribute("style", "position:fixed !important;top:0 !important;left:0 !important;width:100vw !important;height:100vh !important;z-index:2147483646 !important;pointer-events:none !important");
     document.documentElement.appendChild(shadowHost);
     shadowRoot = shadowHost.attachShadow({ mode: "open" });
     return shadowRoot;
@@ -480,18 +615,25 @@ const SHADOW_CSS = `
 :host { all: initial; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans Thai", sans-serif; }
 * { box-sizing: border-box; }
 
-.floater { position: fixed; right: 16px; top: 150px; width: 58px; height: 58px; border-radius: 16px;
-    background: linear-gradient(45deg, #f09433 0%, #dc2743 50%, #bc1888 100%);
-    border: 3px solid #fff; box-shadow: 0 8px 24px rgba(220,39,67,0.5);
+.floater { position: fixed; right: 16px; top: 150px; width: 58px; height: 58px; border-radius: 18px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+    border: none;
+    box-shadow: 0 15px 35px rgba(102, 126, 234, 0.4), 0 5px 15px rgba(118, 75, 162, 0.3), 0 0 0 2px rgba(255,255,255,0.15);
     cursor: pointer; pointer-events: auto; display: flex; align-items: center; justify-content: center;
-    color: white; user-select: none; -webkit-tap-highlight-color: transparent;
-    animation: insta-entry 0.6s ease-out, insta-idle 3.5s ease-in-out 0.6s infinite; }
+    color: white; font-size: 26px; font-weight: 700; text-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    user-select: none; -webkit-tap-highlight-color: transparent;
+    animation: insta-entry 0.6s ease-out, insta-float 3.5s ease-in-out 0.6s infinite; }
 .floater.hidden { display: none; }
 .floater.pressed { transform: scale(0.92); transition: transform 0.1s; }
 .floater.flash { background: red !important; transform: scale(1.5) !important; }
 .floater svg { width: 28px; height: 28px; pointer-events: none; }
 @keyframes insta-entry { 0% { opacity: 0; transform: scale(0); } 60% { transform: scale(1.2); } 100% { opacity: 1; transform: scale(1); } }
-@keyframes insta-idle { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+@keyframes insta-float { 0%, 100% { transform: translateY(0px); } 50% { transform: translateY(-8px); } }
+
+.floater:hover {
+    transform: scale(1.08);
+    box-shadow: 0 20px 45px rgba(102, 126, 234, 0.6), 0 0 0 2px rgba(255,255,255,0.25) !important;
+}
 
 .badge { position: absolute; top: -6px; right: -6px; min-width: 20px; height: 20px; padding: 0 6px;
     background: #ff2d55; color: white; font-size: 11px; font-weight: 700; border-radius: 10px;
@@ -521,7 +663,6 @@ const SHADOW_CSS = `
 .nav-item.active { opacity: 1; transform: scale(1.1); }
 .nav-item.active svg { stroke-width: 2.5; }
 
-/* Manual post bar */
 .post-bar { display: flex; gap: 8px; padding: 10px 14px; background: #0a0a0a; border-bottom: 1px solid #262626; flex-wrap: wrap; }
 .post-bar select, .post-bar button { padding: 8px 12px; background: #262626; border: none; color: #f5f5f5; border-radius: 8px; font-size: 13px; cursor: pointer; }
 .post-bar button.primary { background: linear-gradient(45deg, #dc2743, #bc1888); font-weight: 600; }
@@ -533,8 +674,6 @@ const SHADOW_CSS = `
 .story-ring { width: 62px; height: 62px; border-radius: 50%; background: linear-gradient(45deg, #f09433, #dc2743, #bc1888); padding: 2px; margin: 0 auto; }
 .story-ring img { width: 100%; height: 100%; border-radius: 50%; border: 2px solid #000; object-fit: cover; display: block; }
 .story-name { font-size: 11px; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.story.add { }
-.story.add .story-ring { background: #262626; display: flex; align-items: center; justify-content: center; color: #f5f5f5; font-size: 28px; }
 
 .post { border-bottom: 1px solid #262626; padding-bottom: 8px; position: relative; }
 .post-head { display: flex; align-items: center; padding: 10px 14px; gap: 10px; }
@@ -544,7 +683,7 @@ const SHADOW_CSS = `
 .username { font-weight: 600; font-size: 14px; }
 .post-mood { font-size: 11px; color: #737373; }
 .post-menu { cursor: pointer; padding: 4px 10px; font-size: 20px; color: #f5f5f5; position: relative; }
-.post-menu-dropdown { position: absolute; right: 14px; top: 40px; background: #262626; border-radius: 8px; padding: 6px; display: none; min-width: 130px; z-index: 10; box-shadow: 0 4px 12px rgba(0,0,0,0.6); }
+.post-menu-dropdown { position: absolute; right: 14px; top: 40px; background: #262626; border-radius: 8px; padding: 6px; display: none; min-width: 130px; z-index: 10; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
 .post-menu-dropdown.show { display: block; }
 .post-menu-item { padding: 8px 12px; cursor: pointer; border-radius: 4px; font-size: 13px; }
 .post-menu-item:hover { background: #3a3a3a; }
@@ -584,7 +723,7 @@ const SHADOW_CSS = `
 .profile-top { display: flex; align-items: center; gap: 24px; margin-bottom: 14px; }
 .profile-avatar-wrap { position: relative; }
 .profile-avatar { width: 86px; height: 86px; border-radius: 50%; object-fit: cover; border: 1px solid #262626; }
-.avatar-change { position: absolute; bottom: 0; right: 0; background: #0095f6; color: white; border: 2px solid #000; border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 14px; }
+.avatar-change { position: absolute; bottom: 0; right: 0; background: #0095f6; color: white; border: 2px solid #000; border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; font-size: 14px; cursor: pointer; }
 .profile-stats { display: flex; gap: 18px; flex: 1; justify-content: space-around; }
 .profile-stats > div { text-align: center; display: flex; flex-direction: column; font-size: 13px; }
 .profile-stats b { font-size: 17px; font-weight: 700; }
@@ -655,6 +794,7 @@ const SHADOW_CSS = `
 .npc-info { flex: 1; min-width: 0; }
 .npc-name { font-weight: 600; font-size: 13px; }
 .npc-bio { font-size: 11px; color: #a8a8a8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.npc-role { font-size: 10px; color: #0095f6; margin-top: 2px; }
 
 @media (min-width: 700px) {
     .overlay { top: 3vh !important; left: 50% !important; right: auto !important; bottom: auto !important;
@@ -663,16 +803,12 @@ const SHADOW_CSS = `
 }
 `;
 
-// ---------- Mount UI ----------
 function mountUI() {
     try {
         buildShadowHost();
         shadowRoot.innerHTML =
             "<style>" + SHADOW_CSS + "</style>" +
-            '<div id="floater" class="floater" title="InstaChar">' +
-                '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
-                    '<rect x="5" y="2" width="14" height="20" rx="2.5"></rect><line x1="12" y1="18" x2="12.01" y2="18"></line></svg>' +
-                '<span id="badge" class="badge hidden">0</span></div>' +
+            '<div id="floater" class="floater" title="InstaChar">📱<span id="badge" class="badge hidden">0</span></div>' +
             '<div id="overlay" class="overlay hidden">' +
                 '<div class="statusbar"><span id="clock">—</span><span>📶 🔋</span></div>' +
                 '<div class="topbar"><div class="topbar-title">Instagram</div><div class="topbar-actions">' +
@@ -682,7 +818,7 @@ function mountUI() {
                 '<div class="nav">' +
                     '<button class="nav-item" data-tab="feed"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg></button>' +
                     '<button class="nav-item" data-tab="discover"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></button>' +
-                    '<button class="nav-item" data-tab="post"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg></button>' +
+                    '<button class="nav-item" data-tab="post"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="9" x2="15" y2="9"/><line x1="9" y1="15" x2="15" y2="15"/></svg></button>' +
                     '<button class="nav-item" data-tab="dm"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></button>' +
                     '<button class="nav-item" data-tab="profile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></button>' +
                 '</div></div>' +
@@ -691,7 +827,6 @@ function mountUI() {
 
         const floater = shadowRoot.getElementById("floater");
 
-        // Drag & click
         let pDown = false, pStartX = 0, pStartY = 0, pMoved = false;
         floater.addEventListener("pointerdown", (e) => {
             pDown = true; pStartX = e.clientX; pStartY = e.clientY; pMoved = false;
@@ -747,7 +882,7 @@ function mountUI() {
         });
 
         setInterval(updateClock, 30000);
-        log("UI mounted (shadow DOM)");
+        log("UI mounted ✓");
     } catch (e) {
         log("mountUI failed: " + e.message, true);
     }
@@ -764,7 +899,7 @@ function flashIcon() {
     if (!shadowRoot) return;
     const el = shadowRoot.getElementById("floater");
     if (el) {
-        el.style.animation = "insta-idle 0.4s ease-in-out 3";
+        el.style.animation = "insta-float 0.4s ease-in-out 3";
         setTimeout(() => { el.style.animation = ""; }, 1500);
     }
 }
@@ -781,7 +916,6 @@ function resetIconPos() { getGlobal().iconPos = null; save(); mountUI(); toast("
 
 function openPanel() {
     if (!shadowRoot) return;
-    // Auto-create main character NPC if needed
     ensureNpcFromCharacterCard();
     shadowRoot.getElementById("overlay").classList.remove("hidden");
     const data = getCharData();
@@ -843,11 +977,11 @@ function showModal(html) {
 }
 function closeModal() { if (shadowRoot) shadowRoot.getElementById("modal-root").innerHTML = ""; }
 
-// ---------- Renderers ----------
+// ---------- Renderers (ตัดบางส่วน) ----------
 function renderCurrentTab() {
     const data = getCharData();
     if (!data) {
-        shadowRoot.getElementById("view").innerHTML = '<div class="empty"><div class="empty-icon">👀</div><div class="empty-title">ยังไม่ได้เลือกตัวละคร</div><div class="empty-sub">เข้าแชทตัวละครก่อนแล้วเปิด InstaChar</div></div>';
+        if (shadowRoot) shadowRoot.getElementById("view").innerHTML = '<div class="empty"><div class="empty-icon">👀</div><div class="empty-title">ยังไม่ได้เลือกตัวละคร</div></div>';
         return;
     }
     if (data.selectedProfile) return renderNpcProfile(data.selectedProfile);
@@ -869,43 +1003,18 @@ function renderFeed() {
     const posts = [...data.posts].reverse();
     const npcs = data.npcs;
 
-    // Post bar with NPC selector + manual post button
-    const postBar = `<div class="post-bar">
-        <select id="post-as-npc" style="flex:1;min-width:120px">
-            ${npcs.length === 0 ? '<option value="">ไม่มีตัวละคร → เพิ่มใน Profile</option>' :
-                npcs.map(n => `<option value="${n.id}">${escapeHtml(n.name)}</option>`).join("")}
-        </select>
-        <button id="post-now-btn" class="primary" ${npcs.length === 0 ? 'disabled' : ''}>✨ ให้โพสต์เลย</button>
+    // ✅ ลบปุ่ม "ให้โพสต์เลย" ไปเลย
+    const postBar = `<div class="post-bar" style="justify-content:center;color:#a8a8a8;font-size:12px">
+        🤖 Auto-post activated - Characters post themselves! ✨
     </div>`;
 
     if (posts.length === 0) {
-        view.innerHTML = postBar + '<div class="empty"><div class="empty-icon">📷</div><div class="empty-title">ยังไม่มีโพสต์</div><div class="empty-sub">กด "ให้โพสต์เลย" เพื่อให้ตัวละครโพสต์ตามฉากปัจจุบัน<br><br>หรือเปิด Auto-post ใน Settings</div></div>';
-        attachPostBarHandlers();
+        view.innerHTML = postBar + '<div class="empty"><div class="empty-icon">📷</div><div class="empty-title">ยังไม่มีโพสต์</div><div class="empty-sub">ลองคุยกับตัวละคร เขาจะโพสต์เอง!</div></div>';
         return;
     }
 
     view.innerHTML = postBar + renderStoriesBar() + posts.map(renderPostCard).join("");
-    attachPostBarHandlers();
     attachFeedHandlers();
-}
-
-function attachPostBarHandlers() {
-    const btn = shadowRoot.getElementById("post-now-btn");
-    if (!btn) return;
-    btn.addEventListener("click", async () => {
-        const sel = shadowRoot.getElementById("post-as-npc");
-        const npcId = sel.value;
-        if (!npcId) { toast("เพิ่มตัวละครก่อน (Profile tab)"); return; }
-        const npc = findNpc(npcId);
-        if (!npc) return;
-        btn.disabled = true;
-        btn.textContent = "กำลังโพสต์...";
-        const recentScene = getRecentChat(3);
-        await generatePostFor(npc, recentScene);
-        btn.disabled = false;
-        btn.textContent = "✨ ให้โพสต์เลย";
-        renderCurrentTab();
-    });
 }
 
 function renderStoriesBar() {
@@ -915,6 +1024,7 @@ function renderStoriesBar() {
         data.npcs.map(n => `<div class="story" data-npc="${n.id}">
             <div class="story-ring"><img src="${escapeHtml(n.avatar)}" onerror="this.src='${defaultAvatar(n.name)}'"/></div>
             <div class="story-name">${escapeHtml(n.username)}</div>
+            ${n.role ? `<div class="npc-role">${escapeHtml(n.role)}</div>` : ""}
         </div>`).join("") +
     '</div>';
 }
@@ -925,9 +1035,9 @@ function renderPostCard(post) {
         '<svg viewBox="0 0 24 24" fill="#ed4956" stroke="#ed4956" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>' :
         '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>';
     const npcComments = (post.comments || []).slice(0, 3).map((c, i) =>
-        `<div class="comment"><div class="comment-content"><b>${escapeHtml(c.username)}</b>${escapeHtml(c.text)}</div><button class="comment-del" data-post="${post.id}" data-type="npc" data-idx="${i}" title="ลบ">✕</button></div>`).join("");
+        `<div class="comment"><div class="comment-content"><b>${escapeHtml(c.username)}</b> ${escapeHtml(c.text)}</div><button class="comment-del" data-post="${post.id}" data-type="npc" data-idx="${i}">✕</button></div>`).join("");
     const userComments = (post.userComments || []).map((c, i) =>
-        `<div class="comment"><div class="comment-content"><b>${escapeHtml(c.username)}</b>${escapeHtml(c.text)}</div><button class="comment-del" data-post="${post.id}" data-type="user" data-idx="${i}" title="ลบ">✕</button></div>`).join("");
+        `<div class="comment"><div class="comment-content"><b>${escapeHtml(c.username)}</b> ${escapeHtml(c.text)}</div><button class="comment-del" data-post="${post.id}" data-type="user" data-idx="${i}">✕</button></div>`).join("");
     const totalComments = (post.comments ? post.comments.length : 0) + (post.userComments ? post.userComments.length : 0);
     const moreComments = totalComments > 3 ? `<div class="empty-small" style="padding:4px 14px;text-align:left">ดูคอมเมนต์ทั้งหมด ${totalComments} รายการ</div>` : "";
     const hashtagHtml = (post.hashtags || []).map(t => `<span class="tag">${escapeHtml(t)}</span>`).join(" ");
@@ -989,7 +1099,6 @@ function attachFeedHandlers() {
     shadowRoot.querySelectorAll(".comment-input").forEach(inp => {
         inp.addEventListener("keypress", (e) => { if (e.key === "Enter") addUserComment(inp.dataset.post); });
     });
-    // Post menu
     shadowRoot.querySelectorAll(".post-menu").forEach(menu => {
         menu.addEventListener("click", (e) => {
             e.stopPropagation();
@@ -1012,7 +1121,6 @@ function attachFeedHandlers() {
             deleteComment(btn.dataset.post, btn.dataset.type, parseInt(btn.dataset.idx));
         });
     });
-    // Close dropdowns when clicking elsewhere
     shadowRoot.getElementById("view").addEventListener("click", () => {
         shadowRoot.querySelectorAll(".post-menu-dropdown.show").forEach(d => d.classList.remove("show"));
     });
@@ -1088,11 +1196,11 @@ function renderNpcProfile(npcId) {
             </div>
         </div>
         <div class="profile-name">${escapeHtml(npc.displayName)}</div>
+        ${npc.role ? `<div style="font-size:11px;color:#0095f6;margin-bottom:6px">👤 Role: ${escapeHtml(npc.role)}</div>` : ""}
         <div class="profile-bio">${escapeHtml(npc.bio || "")}</div>
         <div class="profile-actions">
             <button class="follow-btn ${npc.userFollowing ? "following" : ""}" id="follow">${npc.userFollowing ? "กำลังติดตาม" : "ติดตาม"}</button>
             <button class="msg-btn" id="msg">ข้อความ</button>
-            <button class="action-btn" id="post-as-this" title="ให้ตัวละครนี้โพสต์เลย">✨</button>
         </div>
         <div class="profile-grid">
             ${posts.length === 0 ? '<div class="empty-small">ยังไม่มีโพสต์</div>' :
@@ -1111,13 +1219,6 @@ function renderNpcProfile(npcId) {
         data.selectedProfile = null;
         save();
         openDM(npcId);
-    });
-    shadowRoot.getElementById("post-as-this").addEventListener("click", async () => {
-        const btn = shadowRoot.getElementById("post-as-this");
-        btn.textContent = "...";
-        btn.disabled = true;
-        await generatePostFor(npc, getRecentChat(3));
-        renderNpcProfile(npcId);
     });
 }
 
@@ -1251,7 +1352,7 @@ function renderDMList() {
             delete data.dms[id];
             save();
             renderDMList();
-            toast("ลบแชทแล้ว");
+            toast("ลบแชทแล้ว ✓");
         });
     });
 }
@@ -1332,8 +1433,8 @@ function renderMyProfile() {
             </div>
             <div class="profile-stats">
                 <div><b>${myPosts.length}</b><span>โพสต์</span></div>
-                <div><b>${data.npcs.filter(n => n.followsUser).length}</b><span>ผู้ติดตาม</span></div>
-                <div><b>${data.npcs.filter(n => n.userFollowing).length}</b><span>กำลังติดตาม</span></div>
+                <div><b>${data.npcs.filter(n => n.userFollowing).length}</b><span>ผู้ติดตาม</span></div>
+                <div><b>0</b><span>กำลังติดตาม</span></div>
             </div>
         </div>
         <label class="compose-label">Username (IG handle)</label>
@@ -1342,14 +1443,16 @@ function renderMyProfile() {
         <input class="inline-input" id="my-name" placeholder="ชื่อที่แสดง" value="${escapeHtml(up.displayName || userName)}"/>
         <label class="compose-label" style="margin-top:8px">Bio</label>
         <textarea class="inline-input" id="my-bio" rows="2" placeholder="ไบโอ...">${escapeHtml(up.bio || "")}</textarea>
-        <button class="primary-btn" id="save-profile">💾 บันทึก</button>
+        <button class="primary-btn" id="save-profile">💾 บันทึกโปรไฟล์</button>
 
         <h3 style="margin-top:24px;font-size:15px">📋 ตัวละครใน IG (${data.npcs.length})</h3>
-        <div class="compose-hint" style="margin-bottom:8px">คลิก + เพื่อเพิ่ม NPC จาก lorebook/ฉาก ให้โพสต์ได้</div>
+        <div class="compose-hint" style="margin-bottom:8px">✅ ตัวละครเหล่านี้จะโพสต์เองอัตโนมัติ!</div>
         <div id="npc-list">
             ${data.npcs.map(n => `<div class="npc-item">
                 <img class="avatar" src="${escapeHtml(n.avatar)}" onerror="this.src='${defaultAvatar(n.name)}'"/>
-                <div class="npc-info"><div class="npc-name">${escapeHtml(n.name)}</div><div class="npc-bio">${escapeHtml(n.bio || "(no bio)")}</div></div>
+                <div class="npc-info"><div class="npc-name">${escapeHtml(n.name)}</div>
+                    ${n.role ? `<div class="npc-role">Role: ${escapeHtml(n.role)}</div>` : ""}
+                    <div class="npc-bio">${escapeHtml(n.bio || "(no bio)")}</div></div>
                 <button class="comment-del" data-edit-npc="${n.id}" title="แก้ไข">✎</button>
                 <button class="comment-del" data-del-npc="${n.id}" title="ลบ">🗑</button>
             </div>`).join("")}
@@ -1361,7 +1464,6 @@ function renderMyProfile() {
         </div>
     </div>`;
 
-    // Avatar upload
     shadowRoot.getElementById("my-avatar-file").addEventListener("change", (e) => {
         const f = e.target.files && e.target.files[0];
         if (!f) return;
@@ -1371,22 +1473,19 @@ function renderMyProfile() {
             data.userProfile.avatar = ev.target.result;
             save();
             shadowRoot.getElementById("my-avatar-img").src = ev.target.result;
-            toast("อัพโหลดรูปแล้ว (อย่าลืมกด 💾 บันทึก)");
+            toast("✓ อัพโหลดรูปแล้ว");
         };
         r.readAsDataURL(f);
     });
 
-    // Save profile
     shadowRoot.getElementById("save-profile").addEventListener("click", () => {
-        data.userProfile.username = shadowRoot.getElementById("my-username").value.trim();
-        data.userProfile.displayName = shadowRoot.getElementById("my-name").value.trim();
+        data.userProfile.username = shadowRoot.getElementById("my-username").value.trim() || sanitizeUsername(userName);
+        data.userProfile.displayName = shadowRoot.getElementById("my-name").value.trim() || userName;
         data.userProfile.bio = shadowRoot.getElementById("my-bio").value.trim();
         save();
-        toast("บันทึกโปรไฟล์แล้ว ✓");
-        renderMyProfile();
+        toast("✓ บันทึกโปรไฟล์แล้ว");
     });
 
-    // NPC actions
     shadowRoot.getElementById("add-npc").addEventListener("click", () => openNpcModal(null));
     shadowRoot.querySelectorAll("[data-edit-npc]").forEach(b => b.addEventListener("click", () => openNpcModal(b.dataset.editNpc)));
     shadowRoot.querySelectorAll("[data-del-npc]").forEach(b => b.addEventListener("click", () => {
@@ -1405,8 +1504,9 @@ function openNpcModal(npcId) {
     const npc = npcId ? findNpc(npcId) : null;
     showModal(`<h3>${npc ? "แก้ไข" : "เพิ่ม"}ตัวละคร</h3>
         <div class="row"><label>ชื่อตัวละคร *</label><input class="inline-input" id="npc-name" value="${npc ? escapeHtml(npc.name) : ""}"/></div>
-        <div class="row"><label>คำอธิบาย (สำคัญ! — LLM จะใช้อันนี้จับสไตล์การพูด ใส่ให้ละเอียดว่าตัวละครพูดแบบไหน)</label>
-            <textarea class="inline-input" id="npc-desc" rows="4" placeholder="เช่น: เจ้าชู้ พูดกู-มึง ชอบยั่ว ใช้คำหยาบ อารมณ์ร้อน...">${npc ? escapeHtml(npc.description || "") : ""}</textarea></div>
+        <div class="row"><label>คำอธิบาย (LLM จะใช้อันนี้จับสไตล์ก���รพูด)</label>
+            <textarea class="inline-input" id="npc-desc" rows="4" placeholder="เช่น: เจ้าชู้ พูดกู-มึง ชอบยั่ว...">${npc ? escapeHtml(npc.description || "") : ""}</textarea>
+        </div>
         <div class="row"><label>Bio สำหรับ IG (สั้นๆ)</label><input class="inline-input" id="npc-bio" value="${npc ? escapeHtml(npc.bio || "") : ""}" placeholder="bio IG"/></div>
         <div class="row">
             <label>รูปโปรไฟล์</label>
@@ -1450,7 +1550,7 @@ function openNpcModal(npcId) {
         save();
         closeModal();
         renderMyProfile();
-        toast("บันทึกแล้ว");
+        toast("✓ บันทึกแล้ว");
     });
 }
 
@@ -1458,19 +1558,32 @@ function openNpcModal(npcId) {
 async function onMessageReceived() {
     try {
         const g = getGlobal();
-        if (!g.autoPost) return;
+        if (!g.autoPost) {
+            log("Auto-post disabled", false);
+            return;
+        }
         const ctx = getContext();
         const chat = ctx.chat || [];
         const msg = chat[chat.length - 1];
-        if (!msg || msg.is_user || msg.is_system) return;
-        if (Math.random() > g.postChance) return;
+        
+        if (!msg || msg.is_user || msg.is_system) {
+            log("Skipped: user/system message", false);
+            return;
+        }
+        
+        if (Math.random() > g.postChance) {
+            log(`Random skip: ${Math.round(g.postChance * 100)}% chance`, false);
+            return;
+        }
 
-        // Try to find NPC by message sender name
         let npc = msg.name ? findNpcByName(msg.name) : null;
-        // If no match, use main character card
         if (!npc) npc = ensureNpcFromCharacterCard();
-        if (!npc) { log("Auto-post skipped: no NPC found"); return; }
+        if (!npc) { 
+            log("Auto-post skipped: no NPC found", true); 
+            return; 
+        }
 
+        log(`🤖 Auto-posting for: ${npc.name} (Role: ${npc.role || "unknown"})`);
         await generatePostFor(npc, msg.mes || "");
     } catch (e) {
         log("message handler: " + e.message, true);
@@ -1514,8 +1627,7 @@ async function runAmbient() {
             save();
             flashIcon();
         } else if (roll < 0.85) {
-            // Random DM
-            const prompt = `[Ambient DM]\n${buildCharContext(npc)}\n\nCharacter "${npc.name}" randomly DMs ${getUserName()} out of the blue. Short Thai message (1-2 sentences), matching their speech style exactly.\n\nReply directly, no JSON.`;
+            const prompt = `[Ambient DM]\n${buildCharContext(npc)}\n\nCharacter "${npc.name}" randomly DMs ${getUserName()} out of the blue. Short Thai message (1-2 sentences), matching their speech style.\n\nReply directly. No JSON. No prefix. Just the message.`;
             try {
                 const r = await callLLM(prompt, "You are " + npc.name + ". Stay in character.");
                 const reply = (r || "").trim().replace(/^["'`]|["'`]$/g, "").split("\n")[0].slice(0, 300);
@@ -1537,7 +1649,6 @@ function scheduleAmbient() {
     stopAmbient();
     const g = getGlobal();
     if (!g.ambientEnabled) return;
-    // 5-15 minutes
     const delay = 300000 + Math.random() * 600000;
     ambientTimer = setTimeout(async () => {
         await runAmbient();
@@ -1550,6 +1661,10 @@ function stopAmbient() { if (ambientTimer) { clearTimeout(ambientTimer); ambient
 async function loadSettingsUI() {
     try {
         const html = await $.get(extensionFolderPath + "/settings.html");
+        if (!html || html.length < 100) {
+            log("Settings HTML seems incomplete", true);
+            return;
+        }
         $("#extensions_settings2").append(html);
         const g = getGlobal();
         $("#instachar-toggle-icon").prop("checked", g.iconVisible);
@@ -1558,7 +1673,10 @@ async function loadSettingsUI() {
         $("#instachar-chance-slider").val(Math.round(g.postChance * 100));
         $("#instachar-chance-val").text(Math.round(g.postChance * 100) + "%");
         $("#instachar-debug-log").text(debugLog.slice(-14).join("\n"));
-    } catch (e) { log("loadSettingsUI: " + e.message, true); }
+        log("Settings UI loaded ✓", false);
+    } catch (e) { 
+        log("loadSettingsUI: " + e.message, true); 
+    }
 }
 
 function attachDelegation() {
@@ -1568,7 +1686,9 @@ function attachDelegation() {
             save(); setFloaterVisible(getGlobal().iconVisible);
         })
         .on("change.instachar", "#instachar-toggle-autopost", function () {
-            getGlobal().autoPost = $(this).prop("checked"); save();
+            getGlobal().autoPost = $(this).prop("checked"); 
+            save();
+            log("Auto-post: " + ($(this).prop("checked") ? "ON ✓" : "OFF"), false);
         })
         .on("change.instachar", "#instachar-toggle-ambient", function () {
             getGlobal().ambientEnabled = $(this).prop("checked");
@@ -1616,7 +1736,7 @@ jQuery(async () => {
             } catch (e) { log("event bind: " + e.message, true); }
         }
         if (getGlobal().ambientEnabled) scheduleAmbient();
-        log("Ready! 📱 v" + VERSION);
+        log("✅ Ready! Auto-detect Role + Auto-post Enabled! v" + VERSION);
     } catch (e) {
         log("Init FAILED: " + e.message, true);
     }
