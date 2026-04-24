@@ -1,0 +1,12 @@
+{
+    "display_name": "InstaChar",
+    "loading_order": 100,
+    "requires": [],
+    "optional": [],
+    "js": "index.js",
+    "css": "style.css",
+    "author": "Built with Claude",
+    "version": "0.2.0",
+    "homePage": "https://github.com/chonnicha7075-creator/Instachar",
+    "auto_update": true
+}
