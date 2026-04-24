@@ -1,11 +1,11 @@
-/* InstaChar v0.7.0 — Auto-detect Role + Auto-post [FINAL COMPLETE] */
+/* InstaChar v0.8.0 — Modal Fix + Lorebook NPC Scan + Role Editor */
 
 import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced, eventSource, event_types } from "../../../../script.js";
 
 const extensionName = "Instachar";
 const extensionFolderPath = `scripts/extensions/third-party/${extensionName}`;
-const VERSION = "0.7.0";
+const VERSION = "0.8.0";
 
 // ✅ Role detection mapping
 const ROLE_KEYWORDS = {
@@ -22,9 +22,9 @@ const ROLE_KEYWORDS = {
 
 const DEFAULT_GLOBAL = {
     iconVisible: true,
-    autoPost: true,         // ✅ ON by default now
+    autoPost: true,
     ambientEnabled: false,
-    postChance: 0.35,       // ✅ ปรับ 25% → 35% (เล็กน้อย)
+    postChance: 0.35,
     iconPos: null,
     currentTab: "feed",
     characters: {},
@@ -33,9 +33,9 @@ const DEFAULT_GLOBAL = {
 function newCharData() {
     return {
         name: "",
-        npcs: [],              
-        posts: [],             
-        dms: {},               
+        npcs: [],
+        posts: [],
+        dms: {},
         userProfile: { username: "", displayName: "", bio: "", avatar: "" },
         unreadCount: 0,
         selectedProfile: null,
@@ -133,7 +133,6 @@ function getRecentChat(n) {
     } catch (e) { return ""; }
 }
 
-// ✅ NEW: Get Lorebook context
 function getLoreBookContext() {
     try {
         const ctx = getContext();
@@ -193,15 +192,10 @@ function sanitizeUsername(name) {
 const imageCache = new Map();
 function makeImageUrl(prompt, seed) {
     const cacheKey = (prompt || "default") + "_" + seed;
-    if (imageCache.has(cacheKey)) {
-        return imageCache.get(cacheKey);
-    }
+    if (imageCache.has(cacheKey)) return imageCache.get(cacheKey);
     const p = encodeURIComponent(prompt || "aesthetic photo cinematic");
     const url = "https://image.pollinations.ai/prompt/" + p + "?width=512&height=512&nologo=true&model=flux-schnell&seed=" + (seed || Math.floor(Math.random() * 99999));
-    if (imageCache.size > 50) {
-        const firstKey = imageCache.keys().next().value;
-        imageCache.delete(firstKey);
-    }
+    if (imageCache.size > 50) { const firstKey = imageCache.keys().next().value; imageCache.delete(firstKey); }
     imageCache.set(cacheKey, url);
     return url;
 }
@@ -228,63 +222,28 @@ function parseJson(text) {
     }
 }
 
-// ✅ NEW: Auto-detect role/relationship
+// ✅ Auto-detect role/relationship
 function detectRole(npc, description, chatHistory, loreContext) {
-    const fullText = (description + " " + chatHistory + " " + loreContext).toLowerCase();
-    
+    const fullText = ((description || "") + " " + (chatHistory || "") + " " + (loreContext || "")).toLowerCase();
     for (const [role, keywords] of Object.entries(ROLE_KEYWORDS)) {
         for (const kw of keywords) {
-            if (fullText.includes(kw.toLowerCase())) {
-                return role;
-            }
+            if (fullText.includes(kw.toLowerCase())) return role;
         }
     }
-    return null; // ไม่รู้บทบาท ใช้ default
+    return null;
 }
 
-// ✅ NEW: Get pronoun & speech style based on role
+// ✅ Get pronoun & speech style based on role
 function getRoleContext(role) {
     const roleMap = {
-        "พี่": {
-            pronoun: "พี่",
-            description: "ผู้ใหญ่ที่เป็นพี่ชาย",
-            styleHint: "พูดปกติ เป็นผู้ใหญ่ บ้างครั้งอาจหาบ้าง"
-        },
-        "น้อง": {
-            pronoun: "น้อง",
-            description: "คนที่เล็กกว่า",
-            styleHint: "พูดเหมือนน้องชาย น้อยใจ บ้างครั้งเอ้อ"
-        },
-        "แม่": {
-            pronoun: "แม่",
-            description: "แม่",
-            styleHint: "พูดเป็นแม่ เมตตา บางครั้งโวย"
-        },
-        "พ่อ": {
-            pronoun: "ป๊า",
-            description: "พ่อ",
-            styleHint: "พูดเป็นพ่อ เรียบร้อย บ้างครั้งเรียบหรือเสียดสี"
-        },
-        "เพื่อน": {
-            pronoun: "ฉัน/กู",
-            description: "เพื่อน",
-            styleHint: "พูดกู-มึง สนิท ขี้ขลาด บ้างครั้งหยาบ"
-        },
-        "คู่รัก": {
-            pronoun: "ฉัน",
-            description: "คู่รัก",
-            styleHint: "พูดปกติ โรแมนติก เคารพ บ้างครั้งเจ้าเล่น"
-        },
-        "ลูก": {
-            pronoun: "ลูก",
-            description: "ลูก",
-            styleHint: "พูดเป็นลูก บ้างครั้งเอ้อ เรียกพ่อแม่"
-        },
-        "เจ้านาย": {
-            pronoun: "ฉัน",
-            description: "เจ้านาย",
-            styleHint: "พูดสุภาพ เรียบร้อย ยกย่องผู้ใหญ่"
-        },
+        "พี่": { pronoun: "พี่", description: "ผู้ใหญ่ที่เป็นพี่ชาย", styleHint: "พูดปกติ เป็นผู้ใหญ่ บ้างครั้งอาจหาบ้าง" },
+        "น้อง": { pronoun: "น้อง", description: "คนที่เล็กกว่า", styleHint: "พูดเหมือนน้องชาย น้อยใจ บ้างครั้งเอ้อ" },
+        "แม่": { pronoun: "แม่", description: "แม่", styleHint: "พูดเป็นแม่ เมตตา บางครั้งโวย" },
+        "พ่อ": { pronoun: "ป๊า", description: "พ่อ", styleHint: "พูดเป็นพ่อ เรียบร้อย บ้างครั้งเรียบหรือเสียดสี" },
+        "เพื่อน": { pronoun: "ฉัน/กู", description: "เพื่อน", styleHint: "พูดกู-มึง สนิท ขี้ขลาด บ้างครั้งหยาบ" },
+        "คู่รัก": { pronoun: "ฉัน", description: "คู่รัก", styleHint: "พูดปกติ โรแมนติก เคารพ บ้างครั้งเจ้าเล่น" },
+        "ลูก": { pronoun: "ลูก", description: "ลูก", styleHint: "พูดเป็นลูก บ้างครั้งเอ้อ เรียกพ่อแม่" },
+        "เจ้านาย": { pronoun: "ฉัน", description: "เจ้านาย", styleHint: "พูดสุภาพ เรียบร้อย ยกย่องผู้ใหญ่" },
     };
     return roleMap[role] || { pronoun: "ฉัน", description: role || "คนปกติ", styleHint: "พูดปกติ" };
 }
@@ -293,20 +252,16 @@ function getRoleContext(role) {
 function ensureNpcFromCharacterCard() {
     const card = getCharacterCard();
     if (!card) return null;
-    
-    if (card.name?.toLowerCase().includes("narrator") || 
+    if (card.name?.toLowerCase().includes("narrator") ||
         card.name?.toLowerCase().includes("gm") ||
         card.name?.toLowerCase().includes("system")) {
         log("Skipped narrator character: " + card.name, false);
         return null;
     }
-    
     const data = getCharData();
     if (!data) return null;
     let npc = data.npcs.find(n => n.name === card.name);
-    if (!npc) {
-        npc = createNpc(card.name, card.description, card.personality);
-    }
+    if (!npc) npc = createNpc(card.name, card.description, card.personality);
     return npc;
 }
 
@@ -315,12 +270,9 @@ function createNpc(name, description, personality) {
     if (!data) return null;
     const existing = data.npcs.find(n => n.name === name);
     if (existing) return existing;
-    
-    // ✅ Auto-detect role
     const chatHistory = getRecentChat(20);
     const loreContext = getLoreBookContext();
     const detectedRole = detectRole(null, description, chatHistory, loreContext);
-    
     const npc = {
         id: uid("npc"),
         name: name,
@@ -333,7 +285,7 @@ function createNpc(name, description, personality) {
         followers: Math.floor(Math.random() * 5000) + 100,
         following: Math.floor(Math.random() * 500) + 50,
         userFollowing: false,
-        role: detectedRole,  // ✅ Store detected role
+        role: detectedRole,
     };
     try {
         const ctx = getContext();
@@ -371,6 +323,72 @@ function deleteNpc(id) {
     save();
 }
 
+// ✅ NEW: Auto-scan & extract NPCs from Lorebook
+async function extractNpcsFromLorebook(statusCb) {
+    const lore = getLoreBookContext();
+    const card = getCharacterCard();
+    const recentChat = getRecentChat(30);
+
+    if (!lore && !card && !recentChat) {
+        toast("ไม่พบข้อมูล Lorebook หรือ Character Card");
+        return [];
+    }
+
+    const data = getCharData();
+    if (!data) return [];
+    const existingNames = data.npcs.map(n => n.name).join(", ");
+
+    if (statusCb) statusCb("🔍 กำลังวิเคราะห์ตัวละคร...");
+
+    const prompt = `[Extract Supporting Characters/NPCs]
+
+Main character card:
+${card ? `Name: ${card.name}\nDesc: ${(card.description || "").slice(0, 400)}` : "(none)"}
+
+Lorebook/World entries:
+${(lore || "").slice(0, 2000)}
+
+Recent story/chat excerpt:
+${recentChat.slice(0, 1000)}
+
+Task: Find ALL named supporting characters (NOT the main character, NOT the user/player).
+For each character found:
+- Extract their name, personality traits, description, and their relationship/role to main character
+- Determine their speech style (formal? slang? cute? rough? etc.)
+- Infer their role type from: พี่/น้อง/เพื่อน/แม่/พ่อ/คู่รัก/ลูก/เจ้านาย/ผู้ใหญ่/อื่นๆ
+
+Already registered (SKIP THESE): ${existingNames || "none"}
+Main character (SKIP): ${card ? card.name : "unknown"}
+
+Respond ONLY with minified JSON array (empty array [] if none found):
+[{"name":"ชื่อ","description":"บุคลิก ลักษณะ นิสัย","personality":"สไตล์การพูด","role":"ประเภทความสัมพันธ์","bio":"IG bio สั้นๆ 1 ประโยค"}]`;
+
+    try {
+        const response = await callLLM(prompt, "Extract characters. Return JSON array only. No markdown. No explanation.");
+        const npcs = parseJson(response);
+        if (!Array.isArray(npcs) || npcs.length === 0) {
+            toast("ไม่พบ NPC ใหม่ใน Lorebook");
+            return [];
+        }
+        const added = [];
+        for (const nd of npcs) {
+            if (!nd.name || nd.name.trim() === "") continue;
+            if (card && nd.name.toLowerCase() === card.name.toLowerCase()) continue;
+            if (findNpcByName(nd.name)) continue;
+            if (statusCb) statusCb(`➕ เพิ่ม: ${nd.name}...`);
+            const npc = createNpc(nd.name, nd.description || "", nd.personality || "");
+            if (nd.role) npc.role = nd.role;
+            if (nd.bio) npc.bio = nd.bio;
+            added.push(npc);
+        }
+        save();
+        return added;
+    } catch (e) {
+        log("extractNpcsFromLorebook: " + e.message, true);
+        return [];
+    }
+}
+
 // ---------- LLM ----------
 async function callLLM(prompt, systemPrompt) {
     let ctx = null;
@@ -381,9 +399,7 @@ async function callLLM(prompt, systemPrompt) {
     } catch (e) {}
     if (!ctx) { try { ctx = getContext(); } catch (e) {} }
     if (!ctx) throw new Error("Could not get context");
-
     const sysPrompt = systemPrompt || "You are a data assistant. Respond with valid JSON only. No markdown. No explanations.";
-
     if (typeof ctx.generateRaw === "function") {
         try {
             const r = await ctx.generateRaw({ systemPrompt: sysPrompt, prompt: prompt });
@@ -407,29 +423,18 @@ async function callLLM(prompt, systemPrompt) {
 function buildCharContext(npc) {
     const lines = [];
     lines.push(`Character: ${npc.name}`);
-    
-    // ✅ Add role context
     if (npc.role) {
         const roleCtx = getRoleContext(npc.role);
         lines.push(`Role/Relationship: ${npc.role} (${roleCtx.description})`);
         lines.push(`Speech style: ${roleCtx.styleHint}`);
         lines.push(`Pronoun: ${roleCtx.pronoun}`);
     }
-    
     if (npc.description) lines.push(`Description: ${npc.description.slice(0, 500)}`);
     if (npc.personality) lines.push(`Personality: ${npc.personality.slice(0, 300)}`);
-    
     const recent = getRecentChat(10);
-    if (recent) {
-        lines.push(`\nRecent chat excerpt (match this speech style/tone/slang/vocabulary):\n${recent.slice(-1500)}`);
-    }
-    
-    // ✅ Add Lorebook
+    if (recent) lines.push(`\nRecent chat excerpt (match this speech style/tone/slang/vocabulary):\n${recent.slice(-1500)}`);
     const lore = getLoreBookContext();
-    if (lore) {
-        lines.push(`\nLorebook context:\n${lore.slice(-1000)}`);
-    }
-    
+    if (lore) lines.push(`\nLorebook context:\n${lore.slice(-1000)}`);
     return lines.join("\n");
 }
 
@@ -437,10 +442,8 @@ function buildCharContext(npc) {
 async function generatePostFor(npc, sceneContext) {
     const data = getCharData();
     if (!data || !npc) return null;
-
     const charCtx = buildCharContext(npc);
     const sceneText = sceneContext ? sceneContext.slice(0, 600) : "(random slice-of-life moment)";
-
     const prompt = `[Instagram Post Simulator]
 
 ${charCtx}
@@ -460,7 +463,6 @@ CRITICAL RULES:
 
 Respond ONLY with minified JSON:
 {"caption":"thai text matching character voice","imagePrompt":"english","hashtags":["#tag"],"mood":"happy|sad|flirty|chill|excited|moody|proud"}`;
-
     try {
         const systemPrompt = `You are an Instagram content writer.
 - Match the character's EXACT pronouns and speech style
@@ -469,11 +471,9 @@ Respond ONLY with minified JSON:
 - Use emojis strategically
 - ONLY respond with valid JSON
 - Maintain character voice 100%`;
-
         const response = await callLLM(prompt, systemPrompt);
         const d = parseJson(response);
         if (!d || !d.caption) { log("Post JSON invalid", true); return null; }
-
         const likes = Math.max(5, Math.floor((npc.followers || 1000) * (0.3 + Math.random() * 1.4) / 10));
         const post = {
             id: uid("p"),
@@ -510,7 +510,6 @@ async function generateComments(npc, post, sceneContext) {
     const userName = getUserName();
     const data = getCharData();
     const otherNpcs = data.npcs.filter(n => n.id !== npc.id).map(n => n.name).join(", ");
-
     const prompt = `[IG Comments]
 ${npc.name} posted: "${post.caption}" (mood: ${post.mood})
 Scene context: ${sceneContext ? sceneContext.slice(0, 300) : "(none)"}
@@ -525,7 +524,6 @@ Generate 2-4 Thai IG comments. Mix of:
 Keep comments short, natural Thai IG style.
 
 Respond ONLY with JSON array: [{"username":"name","text":"thai"}]`;
-
     try {
         const response = await callLLM(prompt);
         const arr = parseJson(response);
@@ -535,9 +533,7 @@ Respond ONLY with JSON array: [{"username":"name","text":"thai"}]`;
             text: c.text || "",
             timestamp: Date.now(),
         }));
-    } catch (e) {
-        return [];
-    }
+    } catch (e) { return []; }
 }
 
 async function generateReactionToUser(npc, userPost) {
@@ -556,9 +552,7 @@ Respond ONLY with JSON: {"like":true|false,"comment":"thai comment or null"}`;
     try {
         const response = await callLLM(prompt);
         return parseJson(response);
-    } catch {
-        return { like: Math.random() < 0.5, comment: null };
-    }
+    } catch { return { like: Math.random() < 0.5, comment: null }; }
 }
 
 async function generateDMReply(npcId) {
@@ -566,11 +560,9 @@ async function generateDMReply(npcId) {
     if (!data) return;
     const npc = findNpc(npcId);
     if (!npc) return;
-
     const thread = data.dms[npcId] || [];
     const recentThread = thread.slice(-10).map(m => (m.from === "user" ? getUserName() : npc.name) + ": " + m.text).join("\n");
     const charCtx = buildCharContext(npc);
-
     const prompt = `[IG Private DM]
 ${charCtx}
 
@@ -580,7 +572,6 @@ ${recentThread}
 Reply as "${npc.name}" in Thai. Use their EXACT speech style and pronouns. Short (1-3 sentences), casual IG DM vibe. Stay in character.
 
 Reply directly. No JSON. No prefix. Just the message.`;
-
     try {
         const roleCtx = npc.role ? getRoleContext(npc.role) : { pronoun: "ฉัน" };
         const response = await callLLM(prompt, `You are ${npc.name} (${npc.role || "character"}). Use pronoun "${roleCtx.pronoun}". Stay in character.`);
@@ -591,12 +582,10 @@ Reply directly. No JSON. No prefix. Just the message.`;
         data.unreadCount++;
         save();
         flashIcon();
-    } catch (e) {
-        log("DM reply failed: " + e.message, true);
-    }
+    } catch (e) { log("DM reply failed: " + e.message, true); }
 }
 
-// ---------- Shadow DOM (เดียวกับเดิม) ----------
+// ---------- Shadow DOM ----------
 let shadowHost = null;
 let shadowRoot = null;
 
@@ -629,11 +618,7 @@ const SHADOW_CSS = `
 .floater svg { width: 28px; height: 28px; pointer-events: none; }
 @keyframes insta-entry { 0% { opacity: 0; transform: scale(0); } 60% { transform: scale(1.2); } 100% { opacity: 1; transform: scale(1); } }
 @keyframes insta-float { 0%, 100% { transform: translateY(0px); } 50% { transform: translateY(-8px); } }
-
-.floater:hover {
-    transform: scale(1.08);
-    box-shadow: 0 20px 45px rgba(102, 126, 234, 0.6), 0 0 0 2px rgba(255,255,255,0.25) !important;
-}
+.floater:hover { transform: scale(1.08); box-shadow: 0 20px 45px rgba(102, 126, 234, 0.6), 0 0 0 2px rgba(255,255,255,0.25) !important; }
 
 .badge { position: absolute; top: -6px; right: -6px; min-width: 20px; height: 20px; padding: 0 6px;
     background: #ff2d55; color: white; font-size: 11px; font-weight: 700; border-radius: 10px;
@@ -779,13 +764,35 @@ const SHADOW_CSS = `
 .dm-input-wrap input { flex: 1; padding: 10px 14px; border-radius: 20px; background: #121212; border: 1px solid #262626; color: #f5f5f5; font-size: 14px; outline: none; }
 .dm-input-wrap button { padding: 8px 16px; background: transparent; color: #0095f6; border: none; font-weight: 700; cursor: pointer; font-size: 14px; }
 
-.toast { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%) translateY(30px);
+.toast { position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%) translateY(30px);
     background: #262626; color: #f5f5f5; padding: 10px 20px; border-radius: 24px; font-size: 14px;
-    opacity: 0; transition: all 0.3s; pointer-events: none; border: 1px solid #3a3a3a; z-index: 100; }
+    opacity: 0; transition: all 0.3s; pointer-events: none; border: 1px solid #3a3a3a; z-index: 9999;
+    white-space: nowrap; max-width: 90vw; overflow: hidden; text-overflow: ellipsis; }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
-.modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,0.85); display: flex; align-items: center; justify-content: center; z-index: 50; }
-.modal { background: #000; border-radius: 16px; padding: 20px; width: min(400px, 92vw); max-height: 90vh; overflow-y: auto; border: 1px solid #262626; }
+/* ✅ FIXED: Modal แก้ปัญหาขึ้นไปด้านบน */
+.modal-bg {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.88);
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    z-index: 9998;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 24px 16px 60px;
+    pointer-events: auto;
+}
+.modal {
+    background: #111;
+    border-radius: 16px;
+    padding: 20px;
+    width: min(400px, 92vw);
+    border: 1px solid #262626;
+    flex-shrink: 0;
+    margin: auto 0;
+}
 .modal h3 { margin: 0 0 14px 0; font-size: 18px; }
 .modal .row { margin-bottom: 12px; }
 .modal label { display: block; font-size: 12px; color: #a8a8a8; margin-bottom: 4px; }
@@ -855,9 +862,7 @@ function mountUI() {
                 const r = floater.getBoundingClientRect();
                 getGlobal().iconPos = { right: Math.round(window.innerWidth - r.right), top: Math.round(r.top) };
                 save();
-            } else {
-                openPanel();
-            }
+            } else { openPanel(); }
         });
         floater.addEventListener("pointercancel", () => { pDown = false; pMoved = false; floater.classList.remove("pressed"); });
 
@@ -883,9 +888,7 @@ function mountUI() {
 
         setInterval(updateClock, 30000);
         log("UI mounted ✓");
-    } catch (e) {
-        log("mountUI failed: " + e.message, true);
-    }
+    } catch (e) { log("mountUI failed: " + e.message, true); }
 }
 
 function setFloaterVisible(v) {
@@ -963,7 +966,7 @@ function toast(msg) {
     if (!t) return;
     t.textContent = msg;
     t.classList.add("show");
-    setTimeout(() => t.classList.remove("show"), 2000);
+    setTimeout(() => t.classList.remove("show"), 2500);
 }
 
 function showModal(html) {
@@ -977,7 +980,7 @@ function showModal(html) {
 }
 function closeModal() { if (shadowRoot) shadowRoot.getElementById("modal-root").innerHTML = ""; }
 
-// ---------- Renderers (ตัดบางส่วน) ----------
+// ---------- Renderers ----------
 function renderCurrentTab() {
     const data = getCharData();
     if (!data) {
@@ -1001,11 +1004,9 @@ function renderFeed() {
     if (!data) return;
     const view = shadowRoot.getElementById("view");
     const posts = [...data.posts].reverse();
-    const npcs = data.npcs;
 
-    // ✅ ลบปุ่ม "ให้โพสต์เลย" ไปเลย
     const postBar = `<div class="post-bar" style="justify-content:center;color:#a8a8a8;font-size:12px">
-        🤖 Auto-post activated - Characters post themselves! ✨
+        🤖 Auto-post activated — Characters post themselves! ✨
     </div>`;
 
     if (posts.length === 0) {
@@ -1188,6 +1189,7 @@ function renderNpcProfile(npcId) {
         <div class="profile-top">
             <div class="profile-avatar-wrap">
                 <img class="profile-avatar" src="${escapeHtml(npc.avatar)}" onerror="this.src='${defaultAvatar(npc.name)}'"/>
+                <label class="avatar-change" title="เปลี่ยนรูป NPC">📷<input type="file" id="npc-prof-avatar-file" accept="image/*" style="display:none"/></label>
             </div>
             <div class="profile-stats">
                 <div><b>${posts.length}</b><span>โพสต์</span></div>
@@ -1201,12 +1203,29 @@ function renderNpcProfile(npcId) {
         <div class="profile-actions">
             <button class="follow-btn ${npc.userFollowing ? "following" : ""}" id="follow">${npc.userFollowing ? "กำลังติดตาม" : "ติดตาม"}</button>
             <button class="msg-btn" id="msg">ข้อความ</button>
+            <button class="action-btn" id="edit-npc-btn" style="flex:0;padding:8px 14px">✎</button>
         </div>
         <div class="profile-grid">
             ${posts.length === 0 ? '<div class="empty-small">ยังไม่มีโพสต์</div>' :
                 posts.map(p => `<div class="grid-item"><img src="${escapeHtml(p.image)}" loading="lazy"/></div>`).join("")}
         </div>
     </div>`;
+
+    // ✅ เปลี่ยนรูป avatar NPC จากหน้าโปรไฟล์ NPC ได้เลย
+    shadowRoot.getElementById("npc-prof-avatar-file").addEventListener("change", (e) => {
+        const f = e.target.files && e.target.files[0];
+        if (!f) return;
+        if (f.size > 3 * 1024 * 1024) { toast("รูปใหญ่เกิน 3MB"); return; }
+        const r = new FileReader();
+        r.onload = (ev) => {
+            npc.avatar = ev.target.result;
+            save();
+            toast("✓ เปลี่ยนรูป NPC แล้ว");
+            renderNpcProfile(npcId);
+        };
+        r.readAsDataURL(f);
+    });
+
     shadowRoot.getElementById("back").addEventListener("click", () => { data.selectedProfile = null; renderCurrentTab(); });
     shadowRoot.getElementById("follow").addEventListener("click", () => {
         npc.userFollowing = !npc.userFollowing;
@@ -1219,6 +1238,9 @@ function renderNpcProfile(npcId) {
         data.selectedProfile = null;
         save();
         openDM(npcId);
+    });
+    shadowRoot.getElementById("edit-npc-btn").addEventListener("click", () => {
+        openNpcModal(npcId);
     });
 }
 
@@ -1303,7 +1325,6 @@ async function submitUserPost(uploadedImage) {
     data.posts.push(post);
     save();
     statusEl.textContent = "โพสต์แล้ว — กำลังรอตัวละคร react...";
-
     for (const npc of data.npcs) {
         try {
             const reaction = await generateReactionToUser(npc, post);
@@ -1321,7 +1342,7 @@ function renderDMList() {
     const data = getCharData();
     if (!data) return;
     const view = shadowRoot.getElementById("view");
-    const npcsWithDms = data.npcs.filter(n => (data.dms[n.id] && data.dms[n.id].length > 0) || true);
+    const npcsWithDms = data.npcs;
     view.innerHTML = `<div class="dm-header"><div class="dm-title">ข้อความ</div></div>
     <div class="dm-list">
         ${npcsWithDms.length === 0 ? '<div class="empty-small">ยังไม่มีตัวละคร</div>' :
@@ -1422,6 +1443,7 @@ function renderMyProfile() {
     const userName = getUserName();
     const myPosts = data.posts.filter(p => p.isUserPost).reverse();
     const up = data.userProfile;
+
     view.innerHTML = `<div class="profile-head">
         <div></div><div class="profile-username">${escapeHtml(up.username || userName)}</div><div></div>
     </div>
@@ -1450,14 +1472,21 @@ function renderMyProfile() {
         <div id="npc-list">
             ${data.npcs.map(n => `<div class="npc-item">
                 <img class="avatar" src="${escapeHtml(n.avatar)}" onerror="this.src='${defaultAvatar(n.name)}'"/>
-                <div class="npc-info"><div class="npc-name">${escapeHtml(n.name)}</div>
+                <div class="npc-info">
+                    <div class="npc-name">${escapeHtml(n.name)}</div>
                     ${n.role ? `<div class="npc-role">Role: ${escapeHtml(n.role)}</div>` : ""}
-                    <div class="npc-bio">${escapeHtml(n.bio || "(no bio)")}</div></div>
+                    <div class="npc-bio">${escapeHtml(n.bio || "(no bio)")}</div>
+                </div>
                 <button class="comment-del" data-edit-npc="${n.id}" title="แก้ไข">✎</button>
                 <button class="comment-del" data-del-npc="${n.id}" title="ลบ">🗑</button>
             </div>`).join("")}
         </div>
-        <button class="secondary-btn" id="add-npc" style="margin-top:8px">+ เพิ่มตัวละคร</button>
+
+        <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
+            <button class="secondary-btn" id="add-npc" style="flex:1">+ เพิ่มตัวละคร</button>
+            <button class="secondary-btn" id="scan-npcs" style="flex:1;background:linear-gradient(45deg,#1a1a2e,#16213e);border:1px solid #0095f6;color:#0095f6">🔍 สแกน Lorebook</button>
+        </div>
+        <div id="scan-status" style="font-size:12px;color:#a8a8a8;text-align:center;padding:4px 0;min-height:18px"></div>
 
         <div class="profile-grid" style="margin-top:16px">
             ${myPosts.map(p => `<div class="grid-item"><img src="${escapeHtml(p.image)}"/></div>`).join("")}
@@ -1496,28 +1525,74 @@ function renderMyProfile() {
         deleteNpc(id);
         renderMyProfile();
     }));
+
+    // ✅ ปุ่มสแกน Lorebook
+    shadowRoot.getElementById("scan-npcs").addEventListener("click", async () => {
+        const statusEl = shadowRoot.getElementById("scan-status");
+        const btn = shadowRoot.getElementById("scan-npcs");
+        btn.disabled = true;
+        btn.textContent = "⏳ กำลังสแกน...";
+        const added = await extractNpcsFromLorebook((msg) => {
+            if (statusEl) statusEl.textContent = msg;
+        });
+        btn.disabled = false;
+        btn.textContent = "🔍 สแกน Lorebook";
+        if (added.length > 0) {
+            toast(`✅ เพิ่ม NPC ใหม่ ${added.length} ตัว: ${added.map(n => n.name).join(", ")}`);
+            renderMyProfile();
+        } else {
+            if (statusEl) statusEl.textContent = "ไม่พบ NPC ใหม่";
+            setTimeout(() => { if (statusEl) statusEl.textContent = ""; }, 3000);
+        }
+    });
 }
 
+// ✅ FIXED: openNpcModal พร้อม role dropdown + avatar preview
 function openNpcModal(npcId) {
     const data = getCharData();
     if (!data) return;
     const npc = npcId ? findNpc(npcId) : null;
+
+    const roleOptions = Object.keys(ROLE_KEYWORDS).map(r =>
+        `<option value="${r}" ${npc && npc.role === r ? "selected" : ""}>${r}</option>`
+    ).join("");
+
     showModal(`<h3>${npc ? "แก้ไข" : "เพิ่ม"}ตัวละคร</h3>
-        <div class="row"><label>ชื่อตัวละคร *</label><input class="inline-input" id="npc-name" value="${npc ? escapeHtml(npc.name) : ""}"/></div>
-        <div class="row"><label>คำอธิบาย (LLM จะใช้อันนี้จับสไตล์ก���รพูด)</label>
+        <div class="row">
+            <label>ชื่อตัวละคร *</label>
+            <input class="inline-input" id="npc-name" value="${npc ? escapeHtml(npc.name) : ""}"/>
+        </div>
+        <div class="row">
+            <label>คำอธิบาย (LLM จะใช้อันนี้จับสไตล์การพูด)</label>
             <textarea class="inline-input" id="npc-desc" rows="4" placeholder="เช่น: เจ้าชู้ พูดกู-มึง ชอบยั่ว...">${npc ? escapeHtml(npc.description || "") : ""}</textarea>
         </div>
-        <div class="row"><label>Bio สำหรับ IG (สั้นๆ)</label><input class="inline-input" id="npc-bio" value="${npc ? escapeHtml(npc.bio || "") : ""}" placeholder="bio IG"/></div>
+        <div class="row">
+            <label>Bio สำหรับ IG (สั้นๆ)</label>
+            <input class="inline-input" id="npc-bio" value="${npc ? escapeHtml(npc.bio || "") : ""}" placeholder="bio IG"/>
+        </div>
+        <div class="row">
+            <label>Role / ความสัมพันธ์</label>
+            <select class="inline-input" id="npc-role" style="height:40px;cursor:pointer">
+                <option value="" ${!npc || !npc.role ? "selected" : ""}>-- ตรวจจับอัตโนมัติ --</option>
+                ${roleOptions}
+            </select>
+        </div>
         <div class="row">
             <label>รูปโปรไฟล์</label>
-            <label style="display:block;padding:8px;background:#262626;border-radius:8px;text-align:center;cursor:pointer">📷 อัพโหลด<input type="file" id="npc-avatar-file" accept="image/*" style="display:none"/></label>
-            ${npc && npc.avatar ? `<img id="npc-avatar-preview" src="${escapeHtml(npc.avatar)}" style="width:60px;height:60px;border-radius:50%;margin-top:8px;object-fit:cover"/>` : '<img id="npc-avatar-preview" style="display:none;width:60px;height:60px;border-radius:50%;margin-top:8px;object-fit:cover"/>'}
+            <label style="display:block;padding:10px;background:#262626;border-radius:8px;text-align:center;cursor:pointer;margin-bottom:8px">
+                📷 อัพโหลดรูป
+                <input type="file" id="npc-avatar-file" accept="image/*" style="display:none"/>
+            </label>
+            <img id="npc-avatar-preview" src="${npc && npc.avatar ? escapeHtml(npc.avatar) : ""}"
+                style="${npc && npc.avatar ? "" : "display:none;"}width:70px;height:70px;border-radius:50%;object-fit:cover;border:2px solid #262626;display:${npc && npc.avatar ? "block" : "none"}"/>
         </div>
-        <div style="display:flex;gap:8px;margin-top:12px">
+        <div style="display:flex;gap:8px;margin-top:14px">
             <button class="secondary-btn" id="npc-cancel" style="flex:1">ยกเลิก</button>
             <button class="primary-btn" id="npc-save" style="flex:1;margin:0">บันทึก</button>
         </div>`);
+
     let avatarData = npc ? npc.avatar : null;
+
     shadowRoot.getElementById("npc-avatar-file").addEventListener("change", (e) => {
         const f = e.target.files && e.target.files[0];
         if (!f) return;
@@ -1526,25 +1601,32 @@ function openNpcModal(npcId) {
         r.onload = (ev) => {
             avatarData = ev.target.result;
             const img = shadowRoot.getElementById("npc-avatar-preview");
-            img.src = avatarData; img.style.display = "block";
+            img.src = avatarData;
+            img.style.display = "block";
         };
         r.readAsDataURL(f);
     });
+
     shadowRoot.getElementById("npc-cancel").addEventListener("click", closeModal);
+
     shadowRoot.getElementById("npc-save").addEventListener("click", () => {
         const name = shadowRoot.getElementById("npc-name").value.trim();
         const desc = shadowRoot.getElementById("npc-desc").value.trim();
         const bio = shadowRoot.getElementById("npc-bio").value.trim();
+        const roleVal = shadowRoot.getElementById("npc-role").value;
         if (!name) { toast("ใส่ชื่อตัวละคร"); return; }
+
         if (npc) {
             npc.name = name;
             npc.displayName = name;
             npc.description = desc;
             npc.bio = bio;
+            npc.role = roleVal || detectRole(npc, desc, getRecentChat(20), getLoreBookContext()) || npc.role;
             if (avatarData) npc.avatar = avatarData;
         } else {
             const newNpc = createNpc(name, desc, "");
             newNpc.bio = bio;
+            newNpc.role = roleVal || newNpc.role;
             if (avatarData) newNpc.avatar = avatarData;
         }
         save();
@@ -1558,36 +1640,18 @@ function openNpcModal(npcId) {
 async function onMessageReceived() {
     try {
         const g = getGlobal();
-        if (!g.autoPost) {
-            log("Auto-post disabled", false);
-            return;
-        }
+        if (!g.autoPost) { log("Auto-post disabled", false); return; }
         const ctx = getContext();
         const chat = ctx.chat || [];
         const msg = chat[chat.length - 1];
-        
-        if (!msg || msg.is_user || msg.is_system) {
-            log("Skipped: user/system message", false);
-            return;
-        }
-        
-        if (Math.random() > g.postChance) {
-            log(`Random skip: ${Math.round(g.postChance * 100)}% chance`, false);
-            return;
-        }
-
+        if (!msg || msg.is_user || msg.is_system) { log("Skipped: user/system message", false); return; }
+        if (Math.random() > g.postChance) { log(`Random skip: ${Math.round(g.postChance * 100)}% chance`, false); return; }
         let npc = msg.name ? findNpcByName(msg.name) : null;
         if (!npc) npc = ensureNpcFromCharacterCard();
-        if (!npc) { 
-            log("Auto-post skipped: no NPC found", true); 
-            return; 
-        }
-
+        if (!npc) { log("Auto-post skipped: no NPC found", true); return; }
         log(`🤖 Auto-posting for: ${npc.name} (Role: ${npc.role || "unknown"})`);
         await generatePostFor(npc, msg.mes || "");
-    } catch (e) {
-        log("message handler: " + e.message, true);
-    }
+    } catch (e) { log("message handler: " + e.message, true); }
 }
 
 function onChatChanged() {
@@ -1650,10 +1714,7 @@ function scheduleAmbient() {
     const g = getGlobal();
     if (!g.ambientEnabled) return;
     const delay = 300000 + Math.random() * 600000;
-    ambientTimer = setTimeout(async () => {
-        await runAmbient();
-        scheduleAmbient();
-    }, delay);
+    ambientTimer = setTimeout(async () => { await runAmbient(); scheduleAmbient(); }, delay);
 }
 function stopAmbient() { if (ambientTimer) { clearTimeout(ambientTimer); ambientTimer = null; } }
 
@@ -1661,10 +1722,7 @@ function stopAmbient() { if (ambientTimer) { clearTimeout(ambientTimer); ambient
 async function loadSettingsUI() {
     try {
         const html = await $.get(extensionFolderPath + "/settings.html");
-        if (!html || html.length < 100) {
-            log("Settings HTML seems incomplete", true);
-            return;
-        }
+        if (!html || html.length < 100) { log("Settings HTML seems incomplete", true); return; }
         $("#extensions_settings2").append(html);
         const g = getGlobal();
         $("#instachar-toggle-icon").prop("checked", g.iconVisible);
@@ -1674,9 +1732,7 @@ async function loadSettingsUI() {
         $("#instachar-chance-val").text(Math.round(g.postChance * 100) + "%");
         $("#instachar-debug-log").text(debugLog.slice(-14).join("\n"));
         log("Settings UI loaded ✓", false);
-    } catch (e) { 
-        log("loadSettingsUI: " + e.message, true); 
-    }
+    } catch (e) { log("loadSettingsUI: " + e.message, true); }
 }
 
 function attachDelegation() {
@@ -1686,7 +1742,7 @@ function attachDelegation() {
             save(); setFloaterVisible(getGlobal().iconVisible);
         })
         .on("change.instachar", "#instachar-toggle-autopost", function () {
-            getGlobal().autoPost = $(this).prop("checked"); 
+            getGlobal().autoPost = $(this).prop("checked");
             save();
             log("Auto-post: " + ($(this).prop("checked") ? "ON ✓" : "OFF"), false);
         })
@@ -1736,8 +1792,6 @@ jQuery(async () => {
             } catch (e) { log("event bind: " + e.message, true); }
         }
         if (getGlobal().ambientEnabled) scheduleAmbient();
-        log("✅ Ready! Auto-detect Role + Auto-post Enabled! v" + VERSION);
-    } catch (e) {
-        log("Init FAILED: " + e.message, true);
-    }
+        log("✅ Ready! v" + VERSION + " — Modal Fix + Lorebook Scan + Role Editor");
+    } catch (e) { log("Init FAILED: " + e.message, true); }
 });
