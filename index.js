@@ -10,6 +10,7 @@ const VERSION = "0.3.0";
 const DEFAULT_SETTINGS = {
     iconVisible: true,
     autoPost: true,
+    ambientEnabled: true,
     postChance: 0.35,
     imageModel: "flux",
     iconPos: null,
@@ -388,13 +389,15 @@ const SHADOW_CSS = `
     align-items: center;
     justify-content: center;
     animation: insta-fade 0.25s ease-out;
+    z-index: 1;
 }
 .overlay.hidden { display: none; }
 @keyframes insta-fade { from { opacity: 0; } to { opacity: 1; } }
 
 .phone {
-    width: min(420px, 96vw);
-    height: min(820px, 94vh);
+    width: min(420px, 100vw);
+    height: min(820px, 100vh);
+    max-height: 100vh;
     background: #000;
     border-radius: 28px;
     overflow: hidden;
@@ -403,17 +406,19 @@ const SHADOW_CSS = `
     color: #f5f5f5;
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.08);
     animation: insta-pop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    position: relative;
+    min-height: 0;
 }
 @keyframes insta-pop { from { transform: scale(0.92); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 
-.statusbar { display: flex; justify-content: space-between; padding: 8px 18px 4px; font-size: 13px; font-weight: 600; }
-.topbar { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; border-bottom: 1px solid #262626; }
+.statusbar { display: flex; justify-content: space-between; padding: 8px 18px 4px; font-size: 13px; font-weight: 600; flex-shrink: 0; }
+.topbar { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; border-bottom: 1px solid #262626; flex-shrink: 0; }
 .topbar-title { font-family: "Billabong","Pacifico","Dancing Script",cursive; font-size: 28px; }
 .topbar-actions { display: flex; gap: 8px; }
 .icon-btn { background: transparent; border: none; color: #f5f5f5; font-size: 18px; cursor: pointer; width: 32px; height: 32px; border-radius: 50%; }
 .icon-btn:hover { background: #121212; }
 
-.screen { flex: 1; overflow-y: auto; overflow-x: hidden; }
+.screen { flex: 1 1 auto; overflow-y: auto; overflow-x: hidden; min-height: 0; }
 .screen::-webkit-scrollbar { width: 6px; }
 .screen::-webkit-scrollbar-thumb { background: #262626; border-radius: 3px; }
 
@@ -424,6 +429,7 @@ const SHADOW_CSS = `
     border-top: 1px solid #262626;
     padding: 8px 0 10px;
     background: #000;
+    flex-shrink: 0;
 }
 .nav-item { background: transparent; border: none; color: #f5f5f5; cursor: pointer; padding: 6px 12px; opacity: 0.8; }
 .nav-item svg { width: 24px; height: 24px; }
@@ -550,8 +556,9 @@ const SHADOW_CSS = `
 }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
-@media (max-width: 480px) {
-    .phone { width: 100vw; height: 100vh; border-radius: 0; }
+@media (max-width: 600px) {
+    .overlay { background: #000; backdrop-filter: none; }
+    .phone { width: 100vw; height: 100vh; max-height: none; border-radius: 0; box-shadow: none; }
 }
 `;
 
@@ -943,26 +950,71 @@ function renderCompose() {
     view.innerHTML =
         '<div class="compose">' +
             '<div class="compose-title">โพสต์ใหม่</div>' +
+            '<div id="compose-preview" style="display:none;margin-bottom:8px;border-radius:8px;overflow:hidden;background:#121212">' +
+                '<img id="compose-preview-img" style="width:100%;max-height:300px;object-fit:cover;display:block"/>' +
+                '<button id="compose-remove" style="width:100%;padding:6px;background:#262626;color:#ed4956;border:none;cursor:pointer;font-size:12px">✕ ลบรูป</button>' +
+            '</div>' +
+            '<div style="display:flex;gap:8px">' +
+                '<label class="primary-btn" style="flex:1;text-align:center;cursor:pointer;margin:0;background:#262626;color:#f5f5f5">' +
+                    '📷 เลือกรูปจากเครื่อง' +
+                    '<input type="file" id="compose-file" accept="image/*" style="display:none"/>' +
+                '</label>' +
+            '</div>' +
             '<textarea id="compose-caption" placeholder="เขียน caption..." rows="3"></textarea>' +
-            '<label class="compose-label">รูป (prompt ภาษาอังกฤษ หรือ URL):</label>' +
-            '<input type="text" id="compose-image" placeholder="sunset beach aesthetic หรือ https://..."/>' +
-            '<div class="compose-hint">ว่างไว้จะ random ภาพสวยๆ</div>' +
+            '<label class="compose-label">หรือใช้ AI สร้างรูป (prompt ภาษาอังกฤษ):</label>' +
+            '<input type="text" id="compose-image" placeholder="sunset beach aesthetic..."/>' +
+            '<div class="compose-hint">ถ้าไม่มีรูป + ไม่มี prompt จะ random ภาพสวยๆ ให้</div>' +
             '<button id="compose-post" class="primary-btn">โพสต์</button>' +
             '<div id="compose-status" style="font-size:13px;color:#a8a8a8;text-align:center"></div>' +
         '</div>';
-    shadowRoot.getElementById("compose-post").addEventListener("click", submitUserPost);
+
+    let uploadedDataUrl = null;
+    const fileInput = shadowRoot.getElementById("compose-file");
+    const preview = shadowRoot.getElementById("compose-preview");
+    const previewImg = shadowRoot.getElementById("compose-preview-img");
+
+    fileInput.addEventListener("change", (e) => {
+        const file = e.target.files && e.target.files[0];
+        if (!file) return;
+        if (file.size > 5 * 1024 * 1024) {
+            toast("รูปใหญ่เกิน 5MB");
+            return;
+        }
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+            uploadedDataUrl = ev.target.result;
+            previewImg.src = uploadedDataUrl;
+            preview.style.display = "block";
+        };
+        reader.readAsDataURL(file);
+    });
+
+    shadowRoot.getElementById("compose-remove").addEventListener("click", () => {
+        uploadedDataUrl = null;
+        fileInput.value = "";
+        preview.style.display = "none";
+    });
+
+    shadowRoot.getElementById("compose-post").addEventListener("click", () => {
+        submitUserPost(uploadedDataUrl);
+    });
 }
 
-async function submitUserPost() {
+async function submitUserPost(uploadedImage) {
     const s = getSettings();
     const caption = shadowRoot.getElementById("compose-caption").value.trim();
     const imgInput = shadowRoot.getElementById("compose-image").value.trim();
     const statusEl = shadowRoot.getElementById("compose-status");
 
-    let imageUrl, imagePrompt = imgInput;
-    if (imgInput.startsWith("http")) imageUrl = imgInput;
-    else {
-        imagePrompt = imgInput || "aesthetic mood photo cinematic";
+    let imageUrl, imagePrompt = "";
+    if (uploadedImage) {
+        imageUrl = uploadedImage;
+        imagePrompt = caption || "user uploaded photo";
+    } else if (imgInput.startsWith("http")) {
+        imageUrl = imgInput;
+        imagePrompt = caption;
+    } else {
+        imagePrompt = imgInput || caption || "aesthetic mood photo cinematic";
         imageUrl = makeImageUrl(imagePrompt);
     }
 
@@ -981,23 +1033,27 @@ async function submitUserPost() {
     statusEl.textContent = "กำลังโพสต์...";
 
     const charNames = Object.keys(s.charProfiles);
-    for (const name of charNames) {
-        try {
-            const reaction = await generateCharReaction(name, post);
-            if (reaction && reaction.like) post.likes += 1;
-            if (reaction && reaction.comment) {
-                post.comments.push({ username: s.charProfiles[name].username, text: reaction.comment, timestamp: Date.now() });
-            }
-            save();
-        } catch {}
+    if (charNames.length === 0) {
+        statusEl.textContent = "โพสต์แล้ว ✓ (ยังไม่มีตัวละครมา react)";
+    } else {
+        statusEl.textContent = "กำลังรอตัวละคร react...";
+        for (const name of charNames) {
+            try {
+                const reaction = await generateCharReaction(name, post);
+                if (reaction && reaction.like) post.likes += 1;
+                if (reaction && reaction.comment) {
+                    post.comments.push({ username: s.charProfiles[name].username, text: reaction.comment, timestamp: Date.now() });
+                }
+                save();
+            } catch {}
+        }
+        statusEl.textContent = "โพสต์แล้ว ✓ ตัวละครมา react แล้ว";
     }
-
-    statusEl.textContent = "โพสต์แล้ว ✓";
     setTimeout(() => {
         s.currentTab = "feed";
         renderCurrentTab();
         updateNavActive();
-    }, 700);
+    }, 1000);
 }
 
 function renderDMList() {
@@ -1099,6 +1155,184 @@ function renderMyProfile() {
     });
 }
 
+// ---------- Ambient Activity ----------
+let ambientTimer = null;
+
+async function runAmbientActivity() {
+    const s = getSettings();
+    if (!s.autoPost) return; // respect master switch
+    const charNames = Object.keys(s.charProfiles);
+    if (charNames.length === 0) return;
+
+    // Pick random character
+    const charName = charNames[Math.floor(Math.random() * charNames.length)];
+    const userPosts = s.posts.filter(p => p.isUserPost).slice(-5); // recent 5 user posts
+    const charPosts = s.posts.filter(p => p.author === charName).slice(-3);
+
+    // Decide what to do: 40% comment on user post, 25% like user post, 25% DM, 10% post own
+    const roll = Math.random();
+
+    try {
+        if (roll < 0.40 && userPosts.length > 0) {
+            // Comment on user's recent post
+            const target = userPosts[Math.floor(Math.random() * userPosts.length)];
+            const reaction = await generateCharReaction(charName, target);
+            if (reaction && reaction.comment) {
+                target.comments = target.comments || [];
+                target.comments.push({
+                    username: s.charProfiles[charName].username,
+                    text: reaction.comment,
+                    timestamp: Date.now(),
+                });
+                if (reaction.like) target.likes += 1;
+                s.unreadCount = (s.unreadCount || 0) + 1;
+                save();
+                flashIcon();
+                if (isPanelOpen()) renderCurrentTab();
+                log("Ambient: " + charName + " commented on user post");
+            }
+        } else if (roll < 0.65 && userPosts.length > 0) {
+            // Just like a user post
+            const target = userPosts[Math.floor(Math.random() * userPosts.length)];
+            target.likes += 1;
+            s.unreadCount = (s.unreadCount || 0) + 1;
+            save();
+            flashIcon();
+            if (isPanelOpen()) renderCurrentTab();
+            log("Ambient: " + charName + " liked user post");
+        } else if (roll < 0.90) {
+            // Send DM
+            await generateAmbientDM(charName);
+        } else {
+            // Character posts something
+            await generateAmbientPost(charName);
+        }
+    } catch (e) {
+        log("Ambient err: " + e.message, true);
+    }
+}
+
+async function generateAmbientDM(charName) {
+    const s = getSettings();
+    const profile = s.charProfiles[charName];
+    const userName = getUserName();
+    const thread = s.dms[charName] || [];
+    const recentThread = thread.slice(-4).map(m => (m.from === "user" ? userName : charName) + ": " + m.text).join("\n");
+
+    const prompt = `[System: IG DM — Ambient]
+Character "${charName}" decides to randomly DM ${userName} out of the blue.
+
+Previous DM context (if any):
+${recentThread || "(no previous messages)"}
+
+Generate ONE short casual Thai DM that ${charName} would send (1-2 sentences). Match their personality. Could be:
+- Random thought/question
+- Checking in
+- Something they saw/did
+- Flirty/friendly banter
+
+Reply directly, no JSON, no prefix, just the message text.`;
+
+    try {
+        const response = await callLLM(prompt, "You are a character in roleplay. Reply in Thai naturally.");
+        const reply = (response || "").trim().replace(/^["'`]|["'`]$/g, "").split("\n")[0].slice(0, 300);
+        if (!reply) return;
+        s.dms[charName] = s.dms[charName] || [];
+        s.dms[charName].push({ from: "char", text: reply, timestamp: Date.now() });
+        s.unreadCount = (s.unreadCount || 0) + 1;
+        save();
+        flashIcon();
+        if (isPanelOpen()) renderCurrentTab();
+        log("Ambient: " + charName + " sent DM");
+    } catch (e) {
+        log("Ambient DM err: " + e.message, true);
+    }
+}
+
+async function generateAmbientPost(charName) {
+    const s = getSettings();
+    const prompt = `[System: IG Random Post]
+Character "${charName}" decides to post on Instagram right now — just a random slice-of-life moment, not tied to any specific scene.
+
+Generate a post in their personality. Respond ONLY with JSON:
+{"caption": "thai caption", "imagePrompt": "english prompt describing scene", "hashtags": ["#tag"], "mood": "happy|sad|flirty|chill|excited|moody|proud|angry"}`;
+
+    try {
+        const response = await callLLM(prompt);
+        const data = parseJson(response);
+        if (!data || !data.caption) return;
+
+        const profile = s.charProfiles[charName];
+        const likes = Math.max(5, Math.floor((profile.followers || 1000) * (0.3 + Math.random() * 1.4) / 10));
+
+        const post = {
+            id: "p_" + Date.now() + "_" + Math.floor(Math.random() * 999),
+            author: charName,
+            authorUsername: profile.username,
+            authorAvatar: profile.avatar,
+            caption: data.caption || "",
+            hashtags: data.hashtags || [],
+            image: makeImageUrl(data.imagePrompt, Date.now()),
+            imagePrompt: data.imagePrompt,
+            mood: data.mood,
+            timestamp: Date.now(),
+            likes: likes,
+            userLiked: false,
+            comments: [],
+            userComments: [],
+        };
+
+        // Generate a couple random comments
+        try {
+            const commentPrompt = `Character "${charName}" posted: "${data.caption}". Generate 1-3 random Thai IG comments from followers. JSON array: [{"username":"name","text":"thai"}]`;
+            const cResp = await callLLM(commentPrompt);
+            const cArr = parseJson(cResp);
+            if (Array.isArray(cArr)) {
+                post.comments = cArr.slice(0, 3).map(c => ({
+                    username: c.username || "user_" + Math.floor(Math.random() * 999),
+                    text: c.text || "",
+                    timestamp: Date.now(),
+                }));
+            }
+        } catch {}
+
+        profile.postCount = (profile.postCount || 0) + 1;
+        s.posts.push(post);
+        s.unreadCount = (s.unreadCount || 0) + 1;
+        save();
+        flashIcon();
+        if (isPanelOpen()) renderCurrentTab();
+        log("Ambient: " + charName + " posted");
+    } catch (e) {
+        log("Ambient post err: " + e.message, true);
+    }
+}
+
+function startAmbientTimer() {
+    stopAmbientTimer();
+    const scheduleNext = () => {
+        const s = getSettings();
+        if (!s.ambientEnabled) return;
+        // Random interval 60-180 seconds
+        const delay = 60000 + Math.random() * 120000;
+        ambientTimer = setTimeout(async () => {
+            if (s.ambientEnabled) {
+                await runAmbientActivity();
+                scheduleNext();
+            }
+        }, delay);
+    };
+    scheduleNext();
+    log("Ambient timer started");
+}
+
+function stopAmbientTimer() {
+    if (ambientTimer) {
+        clearTimeout(ambientTimer);
+        ambientTimer = null;
+    }
+}
+
 // ---------- Event hooks ----------
 async function onMessageReceived() {
     try {
@@ -1133,6 +1367,7 @@ async function loadSettingsUI() {
         const s = getSettings();
         $("#instachar-toggle-icon").prop("checked", s.iconVisible);
         $("#instachar-toggle-autopost").prop("checked", s.autoPost);
+        $("#instachar-toggle-ambient").prop("checked", s.ambientEnabled);
         $("#instachar-chance-slider").val(Math.round(s.postChance * 100));
         $("#instachar-chance-val").text(Math.round(s.postChance * 100) + "%");
         $("#instachar-debug-log").text(debugLog.slice(-12).join("\n"));
@@ -1151,6 +1386,12 @@ function attachDelegation() {
         .on("change.instachar", "#instachar-toggle-autopost", function () {
             getSettings().autoPost = $(this).prop("checked");
             save();
+        })
+        .on("change.instachar", "#instachar-toggle-ambient", function () {
+            const enabled = $(this).prop("checked");
+            getSettings().ambientEnabled = enabled;
+            save();
+            if (enabled) startAmbientTimer(); else stopAmbientTimer();
         })
         .on("input.instachar", "#instachar-chance-slider", function () {
             const v = parseInt($(this).val());
@@ -1184,6 +1425,7 @@ jQuery(async () => {
                 if (event_types.MESSAGE_RECEIVED) eventSource.on(event_types.MESSAGE_RECEIVED, onMessageReceived);
             } catch (e) { log("event bind: " + e.message, true); }
         }
+        startAmbientTimer();
         log("Ready! 📱");
     } catch (e) {
         log("Init FAILED: " + e.message, true);
