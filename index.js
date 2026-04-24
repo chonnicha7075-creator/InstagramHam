@@ -296,23 +296,51 @@ function injectFAB() {
     let fab = document.getElementById("ic-fab");
     if (fab) fab.remove();
 
+    if (!document.body) {
+        console.warn("[InstaChar] document.body not ready, retrying...");
+        setTimeout(injectFAB, 500);
+        return;
+    }
+
     fab = document.createElement("div");
     fab.id = "ic-fab";
+
+    // Inline styles as fallback in case CSS doesn't load
+    fab.style.cssText = `
+        position: fixed !important;
+        bottom: 90px !important;
+        right: 16px !important;
+        width: 52px !important;
+        height: 52px !important;
+        background: linear-gradient(45deg, #f09433 0%, #e6683c 25%, #dc2743 50%, #cc2366 75%, #bc1888 100%) !important;
+        color: white !important;
+        border-radius: 14px !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        cursor: pointer !important;
+        z-index: 99999 !important;
+        box-shadow: 0 4px 20px rgba(220, 39, 67, 0.5) !important;
+        user-select: none !important;
+        touch-action: none !important;
+        -webkit-tap-highlight-color: transparent !important;
+    `;
+
     fab.innerHTML = `
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:28px;height:28px;pointer-events:none;">
             <rect x="5" y="2" width="14" height="20" rx="2.5" ry="2.5"></rect>
             <line x1="12" y1="18" x2="12.01" y2="18"></line>
         </svg>
         <span id="ic-badge" class="ic-hidden">0</span>
     `;
 
-    // Apply initial position
+    // Apply saved position
     const s = loadSettings();
     if (s.fabPosition.x !== null && s.fabPosition.y !== null) {
-        fab.style.left = s.fabPosition.x + "px";
-        fab.style.top = s.fabPosition.y + "px";
-        fab.style.right = "auto";
-        fab.style.bottom = "auto";
+        fab.style.setProperty("left", s.fabPosition.x + "px", "important");
+        fab.style.setProperty("top", s.fabPosition.y + "px", "important");
+        fab.style.setProperty("right", "auto", "important");
+        fab.style.setProperty("bottom", "auto", "important");
     }
 
     document.body.appendChild(fab);
@@ -1007,13 +1035,53 @@ function registerSlashCommand() {
     }
 }
 
+// ---------- Wand Menu Entry (Primary UI) ----------
+function addWandMenuEntry() {
+    const tryAdd = () => {
+        const menu = document.getElementById("extensionsMenu");
+        if (!menu) return false;
+        if (document.getElementById("instachar_wand_menu")) return true;
+
+        const item = document.createElement("div");
+        item.id = "instachar_wand_menu";
+        item.className = "list-group-item flex-container flexGap5 interactable";
+        item.setAttribute("tabindex", "0");
+        item.innerHTML = `
+            <div class="fa-solid fa-mobile-screen-button extensionsMenuExtensionButton"
+                 style="background: linear-gradient(45deg, #f09433, #dc2743, #bc1888); -webkit-background-clip: text; background-clip: text; color: transparent;"></div>
+            <span>InstaChar 📱</span>
+        `;
+        item.addEventListener("click", (e) => {
+            e.stopPropagation();
+            openApp();
+        });
+        menu.appendChild(item);
+        console.log("[InstaChar] Wand menu entry added ✓");
+        return true;
+    };
+
+    if (tryAdd()) return;
+    let attempts = 0;
+    const interval = setInterval(() => {
+        if (tryAdd() || ++attempts > 30) clearInterval(interval);
+    }, 500);
+}
+
 // ---------- Init ----------
 function init() {
     console.log(`[InstaChar] Initializing v${VERSION}...`);
     try {
         loadSettings();
-        injectFAB();
+        console.log("[InstaChar] Settings loaded");
+
         injectOverlay();
+        console.log("[InstaChar] Overlay injected");
+
+        injectFAB();
+        console.log("[InstaChar] FAB injected");
+
+        addWandMenuEntry();
+
         setInterval(updateClock, 30000);
 
         if (eventSource && event_types) {
@@ -1025,7 +1093,13 @@ function init() {
         }
 
         registerSlashCommand();
-        console.log(`[InstaChar] v${VERSION} loaded ✓`);
+
+        // Show confirmation toast
+        setTimeout(() => {
+            toast("InstaChar v" + VERSION + " พร้อมใช้งาน 📱");
+        }, 1000);
+
+        console.log(`[InstaChar] v${VERSION} loaded ✓ — open via ✨ wand menu or tap FAB`);
     } catch (e) {
         console.error("[InstaChar] init failed:", e);
     }
@@ -1037,3 +1111,14 @@ if (typeof jQuery !== "undefined") {
 } else {
     document.addEventListener("DOMContentLoaded", init);
 }
+
+// Also try via app_ready event (SillyTavern-specific)
+if (typeof eventSource !== "undefined" && typeof event_types !== "undefined") {
+    try {
+        eventSource.on(event_types.APP_READY, () => {
+            console.log("[InstaChar] APP_READY fired, ensuring UI");
+            if (!document.getElementById("instachar_wand_menu")) addWandMenuEntry();
+            if (!document.getElementById("ic-fab")) injectFAB();
+        });
+    } catch {}
+                         }
