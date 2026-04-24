@@ -381,44 +381,52 @@ const SHADOW_CSS = `
 /* Panel - IG style phone */
 .overlay {
     position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.85);
-    backdrop-filter: blur(6px);
+    top: 0; left: 0; right: 0; bottom: 0;
+    width: 100vw;
+    height: 100vh;
+    background: #000;
     pointer-events: auto;
     display: flex;
-    align-items: center;
-    justify-content: center;
+    flex-direction: column;
+    color: #f5f5f5;
     animation: insta-fade 0.25s ease-out;
     z-index: 1;
+    overflow: hidden;
 }
 .overlay.hidden { display: none; }
 @keyframes insta-fade { from { opacity: 0; } to { opacity: 1; } }
 
-.phone {
-    width: min(420px, 100vw);
-    height: min(820px, 100vh);
-    max-height: 100vh;
-    background: #000;
-    border-radius: 28px;
-    overflow: hidden;
+.statusbar {
     display: flex;
-    flex-direction: column;
-    color: #f5f5f5;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.08);
-    animation: insta-pop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
-    position: relative;
-    min-height: 0;
+    justify-content: space-between;
+    padding: 8px 18px 4px;
+    font-size: 13px;
+    font-weight: 600;
+    flex-shrink: 0;
+    height: 28px;
 }
-@keyframes insta-pop { from { transform: scale(0.92); opacity: 0; } to { transform: scale(1); opacity: 1; } }
-
-.statusbar { display: flex; justify-content: space-between; padding: 8px 18px 4px; font-size: 13px; font-weight: 600; flex-shrink: 0; }
-.topbar { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; border-bottom: 1px solid #262626; flex-shrink: 0; }
-.topbar-title { font-family: "Billabong","Pacifico","Dancing Script",cursive; font-size: 28px; }
+.topbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 16px;
+    border-bottom: 1px solid #262626;
+    flex-shrink: 0;
+    height: 56px;
+    box-sizing: border-box;
+}
+.topbar-title { font-family: "Billabong","Pacifico","Dancing Script",cursive; font-size: 28px; line-height: 1; }
 .topbar-actions { display: flex; gap: 8px; }
 .icon-btn { background: transparent; border: none; color: #f5f5f5; font-size: 18px; cursor: pointer; width: 32px; height: 32px; border-radius: 50%; }
 .icon-btn:hover { background: #121212; }
 
-.screen { flex: 1 1 auto; overflow-y: auto; overflow-x: hidden; min-height: 0; }
+.screen {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    overflow-x: hidden;
+    min-height: 0;
+    -webkit-overflow-scrolling: touch;
+}
 .screen::-webkit-scrollbar { width: 6px; }
 .screen::-webkit-scrollbar-thumb { background: #262626; border-radius: 3px; }
 
@@ -430,6 +438,8 @@ const SHADOW_CSS = `
     padding: 8px 0 10px;
     background: #000;
     flex-shrink: 0;
+    height: 52px;
+    box-sizing: border-box;
 }
 .nav-item { background: transparent; border: none; color: #f5f5f5; cursor: pointer; padding: 6px 12px; opacity: 0.8; }
 .nav-item svg { width: 24px; height: 24px; }
@@ -556,9 +566,27 @@ const SHADOW_CSS = `
 }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
-@media (max-width: 600px) {
-    .overlay { background: #000; backdrop-filter: none; }
-    .phone { width: 100vw; height: 100vh; max-height: none; border-radius: 0; box-shadow: none; }
+@media (min-width: 600px) {
+    .overlay {
+        top: 5vh !important;
+        left: 50% !important;
+        right: auto !important;
+        bottom: auto !important;
+        width: 420px !important;
+        height: 90vh !important;
+        max-height: 820px;
+        transform: translateX(-50%);
+        border-radius: 24px;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+    }
+    body::after {
+        content: "";
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.6);
+        z-index: 0;
+        pointer-events: none;
+    }
 }
 `;
 
@@ -576,23 +604,21 @@ function mountUI() {
                 '<span id="badge" class="badge hidden">0</span>' +
             '</div>' +
             '<div id="overlay" class="overlay hidden">' +
-                '<div class="phone">' +
-                    '<div class="statusbar"><span id="clock">—</span><span>📶 🔋</span></div>' +
-                    '<div class="topbar">' +
-                        '<div class="topbar-title">Instagram</div>' +
-                        '<div class="topbar-actions">' +
-                            '<button class="icon-btn" id="btn-refresh" title="Refresh">⟳</button>' +
-                            '<button class="icon-btn" id="btn-close" title="Close">✕</button>' +
-                        '</div>' +
+                '<div class="statusbar"><span id="clock">—</span><span>📶 🔋</span></div>' +
+                '<div class="topbar">' +
+                    '<div class="topbar-title">Instagram</div>' +
+                    '<div class="topbar-actions">' +
+                        '<button class="icon-btn" id="btn-refresh" title="Refresh">⟳</button>' +
+                        '<button class="icon-btn" id="btn-close" title="Close">✕</button>' +
                     '</div>' +
-                    '<div class="screen"><div id="view"></div></div>' +
-                    '<div class="nav">' +
-                        '<button class="nav-item" data-tab="feed"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg></button>' +
-                        '<button class="nav-item" data-tab="discover"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg></button>' +
-                        '<button class="nav-item" data-tab="post"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"></rect><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg></button>' +
-                        '<button class="nav-item" data-tab="dm"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg></button>' +
-                        '<button class="nav-item" data-tab="profile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg></button>' +
-                    '</div>' +
+                '</div>' +
+                '<div class="screen"><div id="view"></div></div>' +
+                '<div class="nav">' +
+                    '<button class="nav-item" data-tab="feed"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg></button>' +
+                    '<button class="nav-item" data-tab="discover"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg></button>' +
+                    '<button class="nav-item" data-tab="post"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"></rect><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg></button>' +
+                    '<button class="nav-item" data-tab="dm"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg></button>' +
+                    '<button class="nav-item" data-tab="profile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg></button>' +
                 '</div>' +
             '</div>' +
             '<div id="toast" class="toast"></div>';
@@ -646,7 +672,6 @@ function mountUI() {
         // Panel handlers
         shadowRoot.getElementById("btn-close").addEventListener("click", closePanel);
         shadowRoot.getElementById("btn-refresh").addEventListener("click", () => renderCurrentTab());
-        overlay.addEventListener("click", (e) => { if (e.target.id === "overlay") closePanel(); });
 
         shadowRoot.querySelectorAll(".nav-item").forEach(btn => {
             btn.addEventListener("click", () => {
