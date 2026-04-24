@@ -1207,7 +1207,7 @@ function renderNpcProfile(npcId) {
         </div>
         <div class="profile-grid">
             ${posts.length === 0 ? '<div class="empty-small">ยังไม่มีโพสต์</div>' :
-                posts.map(p => `<div class="grid-item"><img src="${escapeHtml(p.image)}" loading="lazy"/></div>`).join("")}
+                posts.map(p => `<div class="grid-item" data-post="${p.id}" style="cursor:pointer"><img src="${escapeHtml(p.image)}" loading="lazy"/></div>`).join("")}
         </div>
     </div>`;
 
@@ -1241,6 +1241,53 @@ function renderNpcProfile(npcId) {
     });
     shadowRoot.getElementById("edit-npc-btn").addEventListener("click", () => {
         openNpcModal(npcId);
+    });
+
+    // ✅ กดรูปใน grid → เปิด modal แสดงโพสต์เต็ม
+    shadowRoot.querySelectorAll(".profile-grid .grid-item[data-post]").forEach(el => {
+        el.addEventListener("click", () => {
+            const post = data.posts.find(p => p.id === el.dataset.post);
+            if (!post) return;
+            const liked = post.userLiked;
+            const heartColor = liked ? "#ed4956" : "none";
+            const heartStroke = liked ? "#ed4956" : "currentColor";
+            const allComments = [
+                ...(post.comments || []).map(c => `<div style="padding:4px 0;font-size:13px"><b style="font-weight:700;margin-right:4px">${escapeHtml(c.username)}</b>${escapeHtml(c.text)}</div>`),
+                ...(post.userComments || []).map(c => `<div style="padding:4px 0;font-size:13px"><b style="font-weight:700;margin-right:4px">${escapeHtml(c.username)}</b>${escapeHtml(c.text)}</div>`)
+            ].join("");
+            const hashtagHtml = (post.hashtags || []).map(t => `<span style="color:#0095f6;margin-right:4px">${escapeHtml(t)}</span>`).join("");
+            showModal(`
+                <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+                    <img src="${escapeHtml(npc.avatar)}" style="width:36px;height:36px;border-radius:50%;object-fit:cover;border:1px solid #333"/>
+                    <div>
+                        <div style="font-weight:700;font-size:14px">${escapeHtml(npc.username)}</div>
+                        ${post.mood ? `<div style="font-size:11px;color:#737373">${escapeHtml(post.mood)}</div>` : ""}
+                    </div>
+                </div>
+                <div style="margin:0 -20px;background:#121212">
+                    <img src="${escapeHtml(post.image)}" style="width:100%;max-height:70vw;object-fit:cover;display:block"/>
+                </div>
+                <div style="display:flex;align-items:center;gap:6px;margin-top:10px">
+                    <button id="modal-like-btn" style="background:transparent;border:none;cursor:pointer;padding:4px;color:#f5f5f5">
+                        <svg viewBox="0 0 24 24" width="26" height="26" fill="${heartColor}" stroke="${heartStroke}" stroke-width="2">
+                            <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
+                        </svg>
+                    </button>
+                    <span id="modal-like-count" style="font-size:14px;font-weight:600">${post.likes.toLocaleString()} คนกดใจ</span>
+                </div>
+                <div style="padding:6px 0;font-size:14px;line-height:1.5">
+                    <b style="font-weight:700;margin-right:6px">${escapeHtml(npc.username)}</b>${escapeHtml(post.caption)} ${hashtagHtml}
+                </div>
+                ${allComments ? `<div style="border-top:1px solid #262626;padding-top:8px;margin-top:4px;max-height:120px;overflow-y:auto">${allComments}</div>` : ""}
+                <div style="font-size:11px;color:#737373;margin-top:6px">${timeAgo(post.timestamp)}ที่แล้ว</div>
+                <button id="modal-close-post" class="secondary-btn" style="width:100%;margin-top:12px">ปิด</button>
+            `);
+            shadowRoot.getElementById("modal-close-post").addEventListener("click", closeModal);
+            shadowRoot.getElementById("modal-like-btn").addEventListener("click", () => {
+                toggleLike(post.id);
+                closeModal();
+            });
+        });
     });
 }
 
