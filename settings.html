@@ -1,0 +1,140 @@
+<div class="instachar-settings">
+    <div class="inline-drawer">
+        <div class="inline-drawer-toggle inline-drawer-header">
+            <b>📱 InstaChar — Character Instagram</b>
+            <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+        </div>
+        <div class="inline-drawer-content">
+
+            <div class="instachar-row">
+                <div>
+                    <label for="instachar-toggle-icon">แสดงไอคอนลอย 📱</label>
+                    <div class="hint">ไอคอนโทรศัพท์ที่มุมจอ แตะเพื่อเปิดแอป</div>
+                </div>
+                <label class="instachar-toggle">
+                    <input type="checkbox" id="instachar-toggle-icon" checked />
+                    <span class="instachar-toggle-slider"></span>
+                </label>
+            </div>
+
+            <div class="instachar-row">
+                <div>
+                    <label for="instachar-toggle-autopost">Auto-post จากตัวละคร</label>
+                    <div class="hint">ให้ตัวละครโพสต์ IG อัตโนมัติตามฉาก RP</div>
+                </div>
+                <label class="instachar-toggle">
+                    <input type="checkbox" id="instachar-toggle-autopost" checked />
+                    <span class="instachar-toggle-slider"></span>
+                </label>
+            </div>
+
+            <div class="instachar-row">
+                <div>
+                    <label for="instachar-chance-slider">ความถี่โพสต์: <span id="instachar-chance-val">35%</span></label>
+                    <div class="hint">โอกาสโพสต์ต่อ 1 message ที่ AI ตอบ</div>
+                </div>
+                <input type="range" id="instachar-chance-slider" min="10" max="100" step="5" value="35" style="width:120px" />
+            </div>
+
+            <div class="instachar-row">
+                <div>
+                    <label>เปิดแอป InstaChar</label>
+                    <div class="hint">เปิดหน้า IG ของตัวละคร</div>
+                </div>
+                <button id="instachar-open-btn" class="menu_button" type="button">เปิด</button>
+            </div>
+
+            <div class="instachar-row">
+                <div>
+                    <label>หาไอคอน (ไฟกระพริบ)</label>
+                    <div class="hint">ถ้าหาไอคอนไม่เจอ กดให้มันกระพริบ</div>
+                </div>
+                <button id="instachar-find-btn" class="menu_button" type="button">🔍 หา</button>
+            </div>
+
+            <div class="instachar-row">
+                <div>
+                    <label>รีเซ็ตตำแหน่งไอคอน</label>
+                    <div class="hint">ย้ายไอคอนกลับตำแหน่งเริ่มต้น</div>
+                </div>
+                <button id="instachar-reset-pos-btn" class="menu_button" type="button">รีเซ็ต</button>
+            </div>
+
+            <div class="instachar-row">
+                <div>
+                    <label>ลบข้อมูลทั้งหมด</label>
+                    <div class="hint">ลบโพสต์ DM และทุกอย่าง (ย้อนไม่ได้)</div>
+                </div>
+                <button id="instachar-reset-all-btn" class="menu_button instachar-danger-btn" type="button">ลบทั้งหมด</button>
+            </div>
+
+            <div class="instachar-row">
+                <div>
+                    <label>About</label>
+                    <div class="hint">InstaChar v0.3.0 · by chonnicha7075-creator</div>
+                </div>
+                <a href="https://github.com/chonnicha7075-creator/Instachar" target="_blank" rel="noopener" class="menu_button" style="text-decoration: none;">GitHub ↗</a>
+            </div>
+
+            <div class="instachar-row" style="flex-direction:column;align-items:stretch;margin-top:12px;padding-top:12px;border-top:1px solid rgba(220,39,67,0.15)">
+                <label style="font-size:11px;opacity:0.7;margin-bottom:4px">Status log</label>
+                <pre id="instachar-debug-log" style="font-size:10px;background:rgba(220,39,67,0.08);padding:8px;border-radius:6px;margin:0;white-space:pre-wrap;word-wrap:break-word;color:#bc1888;max-height:180px;overflow-y:auto;font-family:ui-monospace,monospace"></pre>
+            </div>
+
+        </div>
+    </div>
+</div>
+
+<style>
+.instachar-settings .instachar-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 0;
+    gap: 12px;
+    border-bottom: 1px solid rgba(220, 39, 67, 0.08);
+}
+.instachar-settings .instachar-row:last-child { border-bottom: none; }
+.instachar-settings .hint {
+    font-size: 11px;
+    opacity: 0.7;
+    margin-top: 2px;
+}
+.instachar-settings .instachar-toggle {
+    position: relative;
+    display: inline-block;
+    width: 44px;
+    height: 24px;
+    flex-shrink: 0;
+}
+.instachar-settings .instachar-toggle input { opacity: 0; width: 0; height: 0; }
+.instachar-settings .instachar-toggle-slider {
+    position: absolute;
+    cursor: pointer;
+    inset: 0;
+    background: #ccc;
+    border-radius: 24px;
+    transition: .3s;
+}
+.instachar-settings .instachar-toggle-slider:before {
+    position: absolute;
+    content: "";
+    height: 18px;
+    width: 18px;
+    left: 3px;
+    bottom: 3px;
+    background: white;
+    border-radius: 50%;
+    transition: .3s;
+}
+.instachar-settings .instachar-toggle input:checked + .instachar-toggle-slider {
+    background: linear-gradient(45deg, #f09433, #dc2743, #bc1888);
+}
+.instachar-settings .instachar-toggle input:checked + .instachar-toggle-slider:before {
+    transform: translateX(20px);
+}
+.instachar-settings .instachar-danger-btn {
+    color: #dc2743 !important;
+    border-color: #dc2743 !important;
+}
+</style>
