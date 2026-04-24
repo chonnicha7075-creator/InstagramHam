@@ -6,7 +6,7 @@
     "js": "index.js",
     "css": "style.css",
     "author": "Built with Claude",
-    "version": "0.2.0",
+    "version": "0.2.1",
     "homePage": "https://github.com/chonnicha7075-creator/Instachar",
     "auto_update": true
 }
