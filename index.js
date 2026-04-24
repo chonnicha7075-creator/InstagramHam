@@ -770,9 +770,9 @@ const SHADOW_CSS = `
     white-space: nowrap; max-width: 90vw; overflow: hidden; text-overflow: ellipsis; }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
-/* ✅ FIXED: Modal แก้ปัญหาขึ้นไปด้านบน */
+/* ✅ FIXED v2: modal-root อยู่ใน overlay → ใช้ position:absolute */
 .modal-bg {
-    position: fixed;
+    position: absolute;
     top: 0; left: 0; right: 0; bottom: 0;
     background: rgba(0,0,0,0.88);
     display: flex;
@@ -791,7 +791,7 @@ const SHADOW_CSS = `
     width: min(400px, 92vw);
     border: 1px solid #262626;
     flex-shrink: 0;
-    margin: auto 0;
+    margin: 0 0 auto 0;
 }
 .modal h3 { margin: 0 0 14px 0; font-size: 18px; }
 .modal .row { margin-bottom: 12px; }
@@ -828,9 +828,9 @@ function mountUI() {
                     '<button class="nav-item" data-tab="post"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="9" x2="15" y2="9"/><line x1="9" y1="15" x2="15" y2="15"/></svg></button>' +
                     '<button class="nav-item" data-tab="dm"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></button>' +
                     '<button class="nav-item" data-tab="profile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></button>' +
-                '</div></div>' +
-            '<div id="toast" class="toast"></div>' +
-            '<div id="modal-root"></div>';
+                '</div>' +
+                '<div id="modal-root"></div></div>' +
+            '<div id="toast" class="toast"></div>';
 
         const floater = shadowRoot.getElementById("floater");
 
